@@ -6,6 +6,8 @@ import pandas as pd
 from keras.preprocessing import sequence
 from keras.preprocessing.text import Tokenizer
 
+from scipy.sparse import csr_matrix
+
 
 class Vectorizer:
     """Tiny class for fitting a vocabulary and vectorizing texts.
@@ -19,6 +21,7 @@ class Vectorizer:
     """
     def __init__(self):
         self.embeddings = None
+        self.word_dim = 300
 
     def fit(self, texts, maxlen=None, maxlen_ratio=.95):
         """Fit the texts with a keras tokenizer
@@ -52,6 +55,9 @@ class Vectorizer:
         else:
             self.maxlen = maxlen
 
+        self.texts = texts
+        self.vocab_size = len(self.word2idx)
+
     def texts_to_sequences(self, texts, do_pad=True):
         """Vectorize texts as sequences of indices
         
@@ -75,6 +81,7 @@ class Vectorizer:
         
         """
         self.X = self.tok.texts_to_matrix(texts)
+        self.X = csr_matrix(self.X) # for space-savings
 
         return self.X
 
