@@ -1,0 +1,18 @@
+universe = vanilla
+
+Initialdir = /u/ebanner/scratch/code/ICHI-2016-challenge/cnn
+Executable = /u/ebanner/scratch/code/ICHI-2016-challenge/cnn/train.sh
+Arguments  = ARGUMENTS
+
++Group   = "GRAD"
++Project = "INSTRUCTIONAL"
++ProjectDescription = "Research"
++GPUJob = true
+
+requirements = TARGET.GPUSlot
+
+Log    = store/output/EXP_GROUP/EXPERIMENT/log.$(Cluster)
+Output = store/output/EXP_GROUP/EXPERIMENT/out.$(Cluster)
+Error  = store/output/EXP_GROUP/EXPERIMENT/err.$(Cluster)
+
+Queue 1
