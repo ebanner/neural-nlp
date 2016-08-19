@@ -138,12 +138,11 @@ class ProbaLogger(Callback):
     Currently dump predicted probabilities for each validation example.
 
     """
-    def __init__(self, exp_group, exp_id, X_train, nb_class, val_idxs, batch_size, metric):
+    def __init__(self, exp_group, exp_id, X_val, nb_train, nb_class, batch_size, metric):
         self.exp_group, self.exp_id = exp_group, exp_id
-        self.nb_train = len(X_train.values()[0])
+        self.nb_train = nb_train
         self.nb_class = nb_class
-        self.X_val = [X[val_idxs] for X in X_train.values()]
-        self.val_idxs = val_idxs
+        self.X_val = X_val
         self.batch_size = batch_size
         self.metric = metric
 
@@ -171,30 +170,3 @@ class ProbaLogger(Callback):
         y_proba = pickle.load(open(self.proba_loc))
         y_proba[self.val_idxs] = self.model.predict(self.X_val, batch_size=self.batch_size)
         pickle.dump(y_proba, open(self.proba_loc, 'wb'))
-
-class RandomVariableLogger(Callback):
-    """Callback for dumping models weights after each batch"""
-
-    def __init__(self, exp_group, exp_id, burnin=10):
-        self.exp_group, self.exp_id = exp_group, exp_id
-        self.epoch = self.batch = 1
-        self.burnin = burnin
-
-        super(Callback, self).__init__()
-
-    def on_batch_end(self, batch, logs={}):
-        """Currently dump weights after each batch unconditionally
-
-        Eventually only dump weights after a certain number of epochs.
-
-        """
-        if self.epoch < self.burnin: # don't save weights during burn in period
-            self.batch += 1
-            return
-
-        weights_loc = '../store/batch_weights/{}/{}/{}.h5'
-        self.model.save_weights(weights_loc.format(self.exp_group, self.exp_id, self.batch))
-        self.batch += 1
-
-    def on_epoch_end(self, epoch, logs={}):
-        self.epoch += 1

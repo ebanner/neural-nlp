@@ -54,10 +54,10 @@ def per_class_accs(ys):
     ys : labels for training data
 
     """
-    classes = pd.Series(ys.argmax(axis=1)).unique()
-    classes, nb_classes = np.sort(classes), len(classes)
+    nb_train, nb_class = ys.shape
+    classes = np.arange(nb_class, dtype=np.int)
 
-    accs = [0]*nb_classes
+    accs = [0]*nb_class
     for i in classes:
         keras_acc_wapper = partial(compute_acc, i)
         keras_acc_wapper.__name__ = 'acc_{}'.format(i) # keras compile demands __name__ be set
@@ -66,9 +66,9 @@ def per_class_accs(ys):
 
     def macro_acc(y_true, y_pred):
         sum = K.variable(value=0.) # index of class to compute
-        for i in range(nb_classes):
+        for i in range(nb_class):
             sum += accs[i](y_true, y_pred)
-        return sum / nb_classes
+        return sum / nb_class
 
     return accs + [macro_acc] + ['accuracy'] # have keras compute micro-accuracy also
 
@@ -122,7 +122,7 @@ def stratified_batch_generator(X_train, y_train, batch_size, mb_ratios, num_clas
 
         yield X_train[batch_idxs], to_categorical(y_train[batch_idxs])
 
-def cnn_embed(words, filter_lens, nb_filter, reg, max_doclen):
+def cnn_embed(words, filter_lens, nb_filter, max_doclen):
     """Add conv -> max_pool -> flatten for each filter length
     
     Parameters
@@ -130,7 +130,6 @@ def cnn_embed(words, filter_lens, nb_filter, reg, max_doclen):
     words : tensor of shape (max_doclen, vector_dim)
     filter_lens : list of n-gram filers to run over `words`
     nb_filter : number of each ngram filters to use
-    reg : regularization to apply to the conv layer
     max_doclen : length of the document
     
     """
@@ -140,8 +139,7 @@ def cnn_embed(words, filter_lens, nb_filter, reg, max_doclen):
     for i, filter_len in enumerate(filter_lens):
         convolved = Convolution1D(nb_filter=nb_filter,
                                   filter_length=filter_len,
-                                  activation='relu',
-                                  W_regularizer=l2(reg))(words)
+                                  activation='relu')(words)
 
         max_pooled = MaxPooling1D(pool_length=max_doclen-(filter_len-1))(convolved) # max-1 pooling
         flattened = Flatten()(max_pooled)
