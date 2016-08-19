@@ -1,0 +1,5 @@
+.ipynb_checkpoints/
+*.sw[op]
+*.pyc
+*.csv
+*.p
