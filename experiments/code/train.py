@@ -28,7 +28,7 @@ from trainers import CNNTrainer
         batch_size=('batch size', 'option', None, int),
         word2vec_init=('initialize embeddings with word2vec', 'option', None, str),
         nb_train=('number of examples to train on', 'option', None, int),
-        dataset=('name of dataset', 'option', None, str),
+        nb_val=('number of examples to validate on', 'option', None, int),
         n_folds=('number of folds for cross validation', 'option', None, int),
         optimizer=('optimizer to use during training', 'option', None, str),
         lr=('learning rate to use during training', 'option', None, float),
@@ -42,11 +42,10 @@ from trainers import CNNTrainer
 )
 def main(exp_group='', exp_id='', nb_epoch=5, nb_filter=1000, filter_lens='1,2,3', 
         nb_hidden=1, hidden_dim=1024, dropout_prob=.5, dropout_emb='True', reg=0,
-        backprop_emb='False', batch_size=128, word2vec_init='False', nb_train=100000,
-        dataset='ICHI2016', n_folds=5, optimizer='adam', lr=.001,
+        backprop_emb='False', batch_size=128, word2vec_init='False', nb_train=1000000,
+        nb_val=1000000, n_folds=5, optimizer='adam', lr=.001,
         do_cv='False', metric='val_main_acc', callbacks='cb,ce,fl,cv,es',
-        trainer='CNNTrainer', use_masking='True', features='', inputs='abstracts',
-        labels='outcomes'):
+        trainer='CNNTrainer', features='', inputs='abstracts', labels='outcomes'):
     """Training process
 
     1. Parse command line arguments
@@ -73,7 +72,7 @@ def main(exp_group='', exp_id='', nb_epoch=5, nb_filter=1000, filter_lens='1,2,3
     inputs = inputs.split(',')
 
     # load data and supervision
-    trainer = eval(trainer)(dataset, exp_group, exp_id, hyperparam_dict, trainer)
+    trainer = eval(trainer)(exp_group, exp_id, hyperparam_dict, trainer)
     trainer.load_texts(inputs)
     trainer.load_auxiliary(features)
     trainer.load_labels(labels)
@@ -94,7 +93,7 @@ def main(exp_group='', exp_id='', nb_epoch=5, nb_filter=1000, filter_lens='1,2,3
 
         # train
         history = trainer.train(train_idxs, val_idxs, nb_epoch, batch_size,
-                nb_train, callbacks, fold_idx, metric)
+                nb_train, nb_val, callbacks, fold_idx, metric)
 
 
 if __name__ == '__main__':

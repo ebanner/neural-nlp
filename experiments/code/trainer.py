@@ -30,18 +30,16 @@ class Trainer:
     3. Calls fit() to train
 
     """
-    def __init__(self, dataset, exp_group, exp_id, hyperparam_dict, trainer_type):
+    def __init__(self, exp_group, exp_id, hyperparam_dict, trainer_type):
         """Set attributes
 
         Attributes
         ----------
-        dataset : name of dataset to load
         exp_group : name of experiment group
         exp_id : id of experiment
         trainer_type : the name of the type of trainer you are
 
         """
-        self.dataset = dataset
         self.exp_group = exp_group
         self.exp_id = exp_id
         self.hyperparam_dict = hyperparam_dict
@@ -128,7 +126,8 @@ class Trainer:
         model_loc = '../store/models/{}/{}.json'.format(self.exp_group, self.exp_id)
         open(model_loc, 'w').write(json_string)
 
-    def train(self, train_idxs, val_idxs, nb_epoch, batch_size, nb_train, callback_set, fold, metric):
+    def train(self, train_idxs, val_idxs, nb_epoch, batch_size, nb_train,
+            nb_val, callback_set, fold, metric):
         """Set up callbacks
 
         It's expected that the implementing subclass actually does the training
@@ -140,8 +139,8 @@ class Trainer:
         y_train = self.y_train[train_idxs][:nb_train]
 
         # validation set
-        X_val = [X_vec.X[val_idxs] for X_vec in self.X_vecs]
-        y_val = self.y_train[val_idxs]
+        X_val = [X_vec.X[val_idxs][:nb_val] for X_vec in self.X_vecs]
+        y_val = self.y_train[val_idxs][:nb_val]
 
         # define callbacks
         weights_str = '../store/weights/{}/{}/{}-{}.h5'
