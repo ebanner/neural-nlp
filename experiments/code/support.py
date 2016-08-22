@@ -46,12 +46,13 @@ def per_class_f1s(ys):
 
     return f1s + [macro_f1]
 
-def per_class_accs(ys):
+def per_class_accs(ys, multi_label=True):
     """Build up a list of callbacks to compute the per-class accuracies
 
     Parameters
     ----------
     ys : labels for training data
+    multi_label : True if ys has multiple labels per training example
 
     """
     nb_train, nb_class = ys.shape
@@ -59,7 +60,7 @@ def per_class_accs(ys):
 
     accs = [0]*nb_class
     for i in classes:
-        keras_acc_wapper = partial(compute_acc, i)
+        keras_acc_wapper = partial(compute_acc, i, multi_label)
         keras_acc_wapper.__name__ = 'acc_{}'.format(i) # keras compile demands __name__ be set
         
         accs[i] = keras_acc_wapper
