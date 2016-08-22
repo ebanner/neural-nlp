@@ -18,6 +18,7 @@ def compute_acc(class_idx, multi_label, y_true, y_pred):
     y_pred_ = y_pred[:, idx]
     y_true_ = y_true[:, idx]
 
+    # threshold predictions in the multi-label setting
     y_pred__  = K.switch(y_pred_ <= 0.5, 0, 1) if multi_label else y_pred_
 
     return K.mean(K.equal(y_pred__, y_true_)) # compute accuracy
