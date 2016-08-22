@@ -30,20 +30,18 @@ class Trainer:
     3. Calls fit() to train
 
     """
-    def __init__(self, exp_group, exp_id, hyperparam_dict, trainer_type):
+    def __init__(self, exp_group, exp_id, hyperparam_dict):
         """Set attributes
 
         Attributes
         ----------
         exp_group : name of experiment group
         exp_id : id of experiment
-        trainer_type : the name of the type of trainer you are
 
         """
         self.exp_group = exp_group
         self.exp_id = exp_id
         self.hyperparam_dict = hyperparam_dict
-        self.trainer_type = trainer_type
 
     def load_texts(self, inputs):
         """Load inputs
