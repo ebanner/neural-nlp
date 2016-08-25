@@ -170,3 +170,41 @@ class ProbaLogger(Callback):
         y_proba = pickle.load(open(self.proba_loc))
         y_proba[self.val_idxs] = self.model.predict(self.X_val, batch_size=self.batch_size)
         pickle.dump(y_proba, open(self.proba_loc, 'wb'))
+
+class StudyLogger(Callback):
+    """Callback for dumping study vectors at the end of training"""
+
+    def __init__(self, X_abstract, X_summary, exp_group, exp_id):
+        """Save variables
+
+        Parameters
+        ----------
+        X_abstract : vectorized abstracts
+        X_summary : vectorized summaries
+        exp_group : experiment group
+        exp_id : experiment id
+
+        """
+        super(Callback, self).__init__()
+
+        self.X_abstract = X_abstract
+        self.X_summary = X_summary
+        self.exp_group = exp_group
+        self.exp_id = exp_id
+
+        self.dump_loc = '../store/study_vecs/{}/{}.p'.format(self.exp_group, self.exp_id)
+
+    def on_train_begin(self, logs={}):
+        """Create function to dump abstracts"""
+
+        inputs = self.model.inputs + [K.learning_phase()]
+        outputs = self.model.get_layer('lstm_abstract').output
+
+        self.embed_abstracts = K.function(inputs, [outputs])
+
+    def on_train_end(self, logs={}):
+        """Run all abstracts through model and dump the embeddings"""
+
+        TEST_MODE = 0 # learning phase of 0 for test mode (i.e. do *not* apply dropout)
+        abstract_vecs = self.embed_abstracts([self.X_abstract, self.X_summary, TEST_MODE])
+        pickle.dump(abstract_vecs[0], open(self.dump_loc, 'w'))

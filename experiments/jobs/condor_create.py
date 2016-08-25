@@ -59,6 +59,7 @@ def make_exp(exp_group, args):
     get_ipython().system(u'mkdir -p ../store/train/$exp_group/$exp_name')
     get_ipython().system(u'mkdir -p ../store/hyperparams/$exp_group')
     get_ipython().system(u'mkdir -p ../store/models/$exp_group')
+    get_ipython().system(u'mkdir -p ../store/study_vecs/$exp_group')
 
     get_ipython().system(u'mkdir -p exps/$exp_group')
     get_ipython().system(u"sed 's/ARGUMENTS/$arg_str/g' job_template | sed 's/EXP_GROUP/$exp_group/g' | sed 's/EXPERIMENT/$exp_name/g' > exps/$exp_group/$exp_name")
@@ -79,6 +80,7 @@ def make_exps(exp_group, args, num_exps=32, grid_search=False, baseline_exp_grou
     get_ipython().system(u'rm -rf ../store/train/$exp_group')
     get_ipython().system(u'rm -rf ../store/hyperparams/$exp_group')
     get_ipython().system(u'rm -rf ../store/models/$exp_group')
+    get_ipython().system(u'rm -rf ../store/study_vecs/$exp_group')
 
     for i, args_setting in enumerate(args_list):
         make_exp(exp_group, args_setting)

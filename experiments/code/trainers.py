@@ -61,7 +61,7 @@ class SiameseTrainer(Trainer):
                                       input_length=self.vecs['abstracts'].maxlen,
                                       mask_zero=True,
                                       weights=None)(abstract)
-        abstract_vec = LSTM(output_dim=2)(embedded_abstract)
+        abstract_vec = LSTM(output_dim=2, name='lstm_abstract')(embedded_abstract)
 
         # summary vec
         summary = Input(shape=[self.vecs['outcomes'].maxlen], dtype='int32')

@@ -19,7 +19,7 @@ from keras.models import model_from_json
 from support import per_class_f1s, per_class_accs, stratified_batch_generator
 from loggers import weights, updates, update_ratios, gradients, activations
 
-from callbacks import Flusher, TensorLogger, CSVLogger, ProbaLogger
+from callbacks import Flusher, TensorLogger, CSVLogger, ProbaLogger, StudyLogger
 
 
 class Trainer:
@@ -153,9 +153,12 @@ class Trainer:
         cv = CSVLogger(self.exp_group, self.exp_id, self.hyperparam_dict, fold)
         # pl = ProbaLogger(self.exp_group, self.exp_id, X_val, self.nb_train, self.nb_class, batch_size, metric)
         # tl = TensorLogger(X_train, y_train, tensor_funcs=[weights, updates, update_ratios, gradients, activations])
+        sl = StudyLogger(self.vecs['abstracts'][train_idxs],
+                         self.vecs['outcomes'][train_idxs],
+                         self.exp_group, self.exp_id)
 
         # filter down callbacks
-        cb_shorthands, cbs = ['cb', 'ce', 'fl', 'cv', 'es'], [cb, ce, fl, cv, es]
+        cb_shorthands, cbs = ['cb', 'ce', 'fl', 'cv', 'es', 'sl'], [cb, ce, fl, cv, es, sl]
         self.callbacks = [cb for cb_shorthand, cb in zip(cb_shorthands, cbs) if cb_shorthand in callback_set]
 
         if fit_generator:
@@ -163,6 +166,7 @@ class Trainer:
             y_val = np.zeros(nb_val)
             y_val[:nb_val/2] = 1 # first half are true
 
+            # validation set
             X_abstract = self.vecs['abstracts'][val_idxs]
             corrupt_idxs = val_idxs[nb_val/2:]
             val_idxs[nb_val/2:] = np.random.permutation(corrupt_idxs) # corrupt second half
