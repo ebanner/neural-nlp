@@ -51,8 +51,12 @@ class Trainer:
         inputs : list of vectorizer names (expected to be in ../data/vectorizers)
         
         """
-        self.X_vecs = [pickle.load(open('../data/vectorizers/{}.p'.format(input))) for input in inputs]
-        self.nb_train = len(self.X_vecs[0].X)
+        self.vecs, self.nb_train = OrderedDict(), None
+        for input in inputs:
+            self.vecs[input] = pickle.load(open('../data/vectorizers/{}.p'.format(input))) 
+            if self.nb_train:
+                assert self.nb_train == len(self.vecs[input])
+            self.nb_train = len(self.vecs[input])
 
     def load_auxiliary(self, feature_names):
         """Load auxillary features
@@ -83,6 +87,9 @@ class Trainer:
         Mainly configure class names and validation data
 
         """
+        if not labels:
+            return
+
         self.y_vectorizer = pickle.load(open('../data/labels/{}.p'.format(labels)))
         self.y_train = self.y_vectorizer.X
 
@@ -95,7 +102,7 @@ class Trainer:
             self.nb_class = len(uniques)
             self.y_train = to_categorical(self.y_train)
 
-    def compile_model(self, metric, optimizer, lr):
+    def compile_model(self, metric, optimizer, lr, loss):
         """Compile keras model
 
         Also define functions for evaluation.
@@ -108,8 +115,8 @@ class Trainer:
 
         # define metrics
         self.model.compile(self.optimizer,
-                           loss='categorical_crossentropy',
-                           metrics=per_class_accs(self.y_train))
+                           loss=loss,
+                           metrics=per_class_accs(self.y_train) if metric else [])
 
         self.model.summary()
 
@@ -125,44 +132,61 @@ class Trainer:
         open(model_loc, 'w').write(json_string)
 
     def train(self, train_idxs, val_idxs, nb_epoch, batch_size, nb_train,
-            nb_val, callback_set, fold, metric):
-        """Set up callbacks
+            nb_val, callback_set, fold, metric, fit_generator):
+        """Set up callbacks and start training"""
 
-        It's expected that the implementing subclass actually does the training
-        (i.e. calls fit()).
-
-        """
-        # training set
-        X_train = [X_vec.X[train_idxs][:nb_train] for X_vec in self.X_vecs]
-        y_train = self.y_train[train_idxs][:nb_train]
-
-        # validation set
-        X_val = [X_vec.X[val_idxs][:nb_val] for X_vec in self.X_vecs]
-        y_val = self.y_train[val_idxs][:nb_val]
+        # train and validation sets
+        train_idxs, val_idxs = train_idxs[:nb_train], val_idxs[:nb_val]
+        X_train, X_val = [X[train_idxs] for X in self.vecs.values()], [X[val_idxs] for X in self.vecs.values()]
 
         # define callbacks
-        weights_str = '../store/weights/{}/{}/{}-{}.h5'
-        cb = ModelCheckpoint(weights_str.format(self.exp_group, self.exp_id, fold, metric),
+        weight_str = '../store/weights/{}/{}/{}-{}.h5'
+        cb = ModelCheckpoint(weight_str.format(self.exp_group, self.exp_id, fold, metric),
                              monitor='acc',
                              save_best_only=True,
                              mode='max')
-        ce = ModelCheckpoint(weights_str.format(self.exp_group, self.exp_id, fold, 'loss'),
+        ce = ModelCheckpoint(weight_str.format(self.exp_group, self.exp_id, fold, 'loss'),
                              monitor='loss', # every time training loss goes down
                              mode='min')
         es = EarlyStopping(monitor='val_acc', patience=10, verbose=2, mode='max')
         fl = Flusher()
         cv = CSVLogger(self.exp_group, self.exp_id, self.hyperparam_dict, fold)
-        pl = ProbaLogger(self.exp_group, self.exp_id, X_val, self.nb_train, self.nb_class, batch_size, metric)
-        tl = TensorLogger(X_train, y_train, tensor_funcs=[weights, updates, update_ratios, gradients, activations])
+        # pl = ProbaLogger(self.exp_group, self.exp_id, X_val, self.nb_train, self.nb_class, batch_size, metric)
+        # tl = TensorLogger(X_train, y_train, tensor_funcs=[weights, updates, update_ratios, gradients, activations])
 
         # filter down callbacks
-        cb_shorthands, cbs = ['cb', 'ce', 'fl', 'cv', 'pl', 'tl', 'es'], [cb, ce, fl, cv, pl, tl, es]
+        cb_shorthands, cbs = ['cb', 'ce', 'fl', 'cv', 'es'], [cb, ce, fl, cv, es]
         self.callbacks = [cb for cb_shorthand, cb in zip(cb_shorthands, cbs) if cb_shorthand in callback_set]
 
-        # random minibatch sampling
-        history = self.model.fit(X_train, y_train,
-                                 batch_size=batch_size,
-                                 nb_epoch=nb_epoch,
-                                 verbose=2,
-                                 validation_data=(X_val, y_val),
-                                 callbacks=self.callbacks)
+        if fit_generator:
+            # construct y_val
+            y_val = np.zeros(nb_val)
+            y_val[:nb_val/2] = 1 # first half are true
+
+            X_abstract = self.vecs['abstracts'][val_idxs]
+            corrupt_idxs = val_idxs[nb_val/2:]
+            val_idxs[nb_val/2:] = np.random.permutation(corrupt_idxs) # corrupt second half
+            X_summary = self.vecs['outcomes'][val_idxs]
+
+            # create batch generator
+            from support import pair_generator
+            gen_pairs = pair_generator(self.vecs['abstracts'][train_idxs],
+                                       self.vecs['outcomes'][train_idxs],
+                                       batch_size)
+
+            self.model.fit_generator(gen_pairs,
+                                     samples_per_epoch=batch_size,
+                                     nb_epoch=nb_epoch,
+                                     verbose=2,
+                                     callbacks=self.callbacks,
+                                     validation_data=([X_abstract, X_summary], y_val))
+        else:
+            y_train, y_val = self.y_train[train_idxs], self.y_train[val_idxs]
+
+            # random minibatch sampling
+            history = self.model.fit(X_train, y_train,
+                                    batch_size=batch_size,
+                                    nb_epoch=nb_epoch,
+                                    verbose=2,
+                                    validation_data=(X_val, y_val),
+                                    callbacks=self.callbacks)

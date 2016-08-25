@@ -148,3 +148,30 @@ def cnn_embed(words, filter_lens, nb_filter, max_doclen):
         activations[i] = flattened
 
     return merge(activations, mode='concat') if len(filter_lens) > 1 else flattened
+
+def pair_generator(X_abstract, X_summary, batch_size):
+    """Yields batches of valid and corrupt (abstract, summary) pairs to train on
+    
+    Parameters
+    ----------
+    X_abstract : vectorized abstracts
+    X_summary : vectorized summaries
+    batch_size : number of samples per batch
+    
+    Half of the samples will be valid (abstract, summary) pairs and the second
+    half will be corrupt (abstract, summary') pairs.
+    
+    """
+    nb_train = len(X_abstract)
+    assert nb_train == len(X_summary)
+
+    y = np.zeros(batch_size)
+    y[:batch_size/2] = 1 # first half of the samples will be good - second half will be corrupt
+    
+    while True:
+        abstract_idxs = np.random.choice(nb_train, size=batch_size)
+        summary_idxs = np.copy(abstract_idxs)
+        corrupt_summary_idxs = np.random.choice(nb_train, size=batch_size/2)
+        summary_idxs[batch_size/2:] = corrupt_summary_idxs
+        
+        yield [X_abstract[abstract_idxs], X_summary[summary_idxs]], y

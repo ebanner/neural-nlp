@@ -2,10 +2,6 @@ from collections import OrderedDict
 
 from keras.layers import Input, Embedding, Dropout, Dense, LSTM, merge
 from keras.layers import Convolution1D, MaxPooling1D, Flatten, merge
-from keras.layers import Permute, Flatten, TimeDistributed, RepeatVector, ActivityRegularization
-from keras.layers.convolutional import AveragePooling1D
-from keras.layers.normalization import BatchNormalization
-from keras.regularizers import activity_l1, l2
 from keras.models import Model
 
 from trainer import Trainer
@@ -18,8 +14,8 @@ class CNNTrainer(Trainer):
     def build_model(self, nb_filter, filter_lens, nb_hidden, hidden_dim,
             dropout_prob, dropout_emb, backprop_emb, word2vec_init):
 
-        assert len(self.X_vecs) == 1
-        vec = self.X_vecs[0]
+        assert len(self.vecs) == 1
+        vec = self.vecs[0]
 
         # input
         input = Input(shape=[vec.maxlen], dtype='int32')
@@ -42,4 +38,43 @@ class CNNTrainer(Trainer):
 
         probs = Dense(output_dim=self.nb_class, activation='sigmoid')(hidden)
 
-        self.model = Model(input=input, output=probs) # define the model
+        self.model = Model(input=input, output=probs)
+
+class SiameseTrainer(Trainer):
+    """Two-input model which embeds abstract and summary
+    
+    Either push them apart or pull them together depending on label. Currently
+    the abstracts and summaries do not share any weights. I think this makes
+    sense as what we really care about is processing abstracts, not summaries.
+    However, by not sharing weights, we could be missing out on synonyms for
+    words used in the summary which are not used in the abstract, which could
+    help us learn better word vectors and filters.
+    
+    """
+    def build_model(self, nb_filter, filter_lens, nb_hidden, hidden_dim,
+            dropout_prob, dropout_emb, backprop_emb, word2vec_init):
+
+        # abstract vec
+        abstract = Input(shape=[self.vecs['abstracts'].maxlen], dtype='int32')
+        embedded_abstract = Embedding(output_dim=self.vecs['abstracts'].word_dim,
+                                      input_dim=self.vecs['abstracts'].vocab_size,
+                                      input_length=self.vecs['abstracts'].maxlen,
+                                      mask_zero=True,
+                                      weights=None)(abstract)
+        abstract_vec = LSTM(output_dim=2)(embedded_abstract)
+
+        # summary vec
+        summary = Input(shape=[self.vecs['outcomes'].maxlen], dtype='int32')
+        embedded_summary = Embedding(output_dim=self.vecs['outcomes'].word_dim,
+                                      input_dim=self.vecs['outcomes'].vocab_size,
+                                      input_length=self.vecs['outcomes'].maxlen,
+                                      mask_zero=True,
+                                      weights=None)(summary)
+        summary_vec = LSTM(output_dim=2)(embedded_summary)
+
+        # dot vectors
+        score = merge(inputs=[abstract_vec, summary_vec],
+                      mode='dot',
+                      dot_axes=1) # won't work without `dot_axes=1` (!!)
+
+        self.model = Model(input=[abstract, summary], output=score)

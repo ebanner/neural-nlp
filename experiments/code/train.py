@@ -10,7 +10,7 @@ import pandas as pd
 
 from sklearn.cross_validation import KFold
 
-from trainers import CNNTrainer
+from trainers import CNNTrainer, SiameseTrainer
 
 
 @plac.annotations(
@@ -39,13 +39,16 @@ from trainers import CNNTrainer
         features=('list of additional features to use', 'option', None, str),
         inputs=('data to use for input', 'option', None, str),
         labels=('labels to use', 'option', None, str),
+        fit_generator=('whether to use a fit generator', 'option', None, str),
+        loss=('type of loss to use', 'option', None, str),
 )
 def main(exp_group='', exp_id='', nb_epoch=5, nb_filter=1000, filter_lens='1,2,3', 
         nb_hidden=1, hidden_dim=1024, dropout_prob=.5, dropout_emb='True', reg=0,
         backprop_emb='False', batch_size=128, word2vec_init='False', nb_train=1000000,
         nb_val=1000000, n_folds=5, optimizer='adam', lr=.001,
         do_cv='False', metric='val_main_acc', callbacks='cb,ce,fl,cv,es',
-        trainer='CNNTrainer', features='', inputs='abstracts', labels='outcomes'):
+        trainer='CNNTrainer', features='', inputs='abstracts,outcomes', labels='outcomes',
+        fit_generator='False', loss='binary_crossentropy'):
     """Training process
 
     1. Parse command line arguments
@@ -70,16 +73,18 @@ def main(exp_group='', exp_id='', nb_epoch=5, nb_filter=1000, filter_lens='1,2,3
     callbacks = callbacks.split(',')
     features = features.split(',') if features != '' else []
     inputs = inputs.split(',')
+    labels = None if labels == 'None' else labels
+    metric = None if metric == 'None' else metric
+    fit_generator = True if fit_generator == 'True' else False
 
     # load data and supervision
-    trainer = eval(trainer)(exp_group, exp_id, hyperparam_dict, trainer)
+    trainer = eval(trainer)(exp_group, exp_id, hyperparam_dict)
     trainer.load_texts(inputs)
     trainer.load_auxiliary(features)
     trainer.load_labels(labels)
 
     # set up fold(s)
-    nb_texts = len(trainer.X_vecs[0].X)
-    folds = KFold(nb_texts, n_folds, shuffle=True, random_state=1337) # for reproducibility!
+    folds = KFold(trainer.nb_train, n_folds, shuffle=True, random_state=1337) # for reproducibility!
     if not do_cv:
         folds = list(folds)[:1] # only do the first fold if not doing cross-valiadtion
 
@@ -88,12 +93,12 @@ def main(exp_group='', exp_id='', nb_epoch=5, nb_filter=1000, filter_lens='1,2,3
         # model
         trainer.build_model(nb_filter, filter_lens, nb_hidden, hidden_dim,
                 dropout_prob, dropout_emb, backprop_emb, word2vec_init)
-        trainer.compile_model(metric, optimizer, lr)
+        trainer.compile_model(metric, optimizer, lr, loss)
         trainer.save_architecture()
 
         # train
         history = trainer.train(train_idxs, val_idxs, nb_epoch, batch_size,
-                nb_train, nb_val, callbacks, fold_idx, metric)
+                nb_train, nb_val, callbacks, fold_idx, metric, fit_generator)
 
 
 if __name__ == '__main__':
