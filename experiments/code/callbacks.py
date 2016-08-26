@@ -36,6 +36,73 @@ class ValidationLogger(Callback):
         print 'scikit f1s:', f1s
         print 'scikit f1:', np.mean(f1s)
 
+class StudySimilarityLogger(Callback):
+    """Callback for computing study similarity during training"""
+
+    def __init__(self, vecs, train_idxs, phase=1, nb_study=1000):
+        """Save variables
+
+        Parameters
+        ----------
+        X_study : vectorized studies
+        X_summary : vectorized summaries
+        phase : 1 for train and 0 for test
+        nb_study : number of studies to send through
+
+        """
+        super(Callback, self).__init__()
+
+        self.X_study, self.X_summary = vecs['abstracts'].X, vecs['outcomes'].X
+        self.train_idxs = train_idxs
+        self.phase = phase
+        self.nb_study = nb_study
+
+        self.nb_train = len(self.X_study)
+        assert len(self.X_summary) == self.nb_train
+
+    def on_train_begin(self, logs={}):
+        """Build keras function to produce vectorized studies
+        
+        Even though some tensors may not need all of these inputs, it doesn't
+        hurt to include them for those that do.
+
+        Also load the dataframe which contains the cdnos.
+        
+        """
+        inputs = self.model.inputs + [K.learning_phase()]
+        outputs = self.model.get_layer('lstm_abstract').output
+        self.embed_studies = K.function(inputs, [outputs])
+
+        # load cdnos
+        df = pd.read_csv('../data/extra/study_inclusion.csv', index_col=0).ix[self.train_idxs]
+        self.cdnos = df.cdno.astype('category').cat.codes
+
+    def on_epoch_end(self, epoch, logs={}):
+        """Compute study similarity from the same review and different reviews"""
+
+        subset = np.random.choice(self.nb_train, size=self.nb_study)
+        X_study, X_summary = self.X_study[subset], self.X_summary[subset]
+
+        TEST_MODE = 0 # learning phase of 0 for test mode (i.e. do *not* apply dropout)
+        study_vecs = self.embed_studies([X_study, X_summary, TEST_MODE])
+
+        similarity_scores = np.dot(study_vecs, study_vecs.T) # compute similarities
+
+        # compute mean similarities between studies from same and different reviews
+        nb_same = nb_different = 0
+        same_sum = different_sum = 0
+        for i in range(self.nb_train):
+            for j in range(i+1, self.nb_train):
+                if self.cdnos.iloc[i] == self.cdnos.iloc[j]:
+                    same_sum += similarity_scores[i][j]
+                    nb_same += 1
+                else:
+                    different_sum += similarity_scores[i][j]
+                    nb_different += 1
+                    
+        logs['same_mean'] = same_sum / nb_same
+        logs['different_mean'] = different_sum / nb_different
+
 class TensorLogger(Callback):
     """Callback for monitoring value of tensors during training"""
 
@@ -122,10 +189,6 @@ class CSVLogger(Callback):
         hyperparameters.
         
         """
-        if 'acc' in logs: # fixup strings for visualization code if only using 1 output
-            logs = {metric.replace('acc', 'main_acc'): val for metric, val in logs.items()}
-            logs = {metric.replace('loss', 'main_loss'): val for metric, val in logs.items()}
-
         frame = {metric: [val] for metric, val in logs.items()}
         pd.DataFrame(frame).to_csv(self.train_path,
                                    index=False,
@@ -158,10 +221,6 @@ class ProbaLogger(Callback):
     def on_epoch_end(self, epoch, logs={}):
         """Update existing predicted probas or add probs from new fold"""
 
-        if 'acc' in logs: # fixup strings for visualization code if only using 1 output
-            logs = {metric.replace('acc', 'main_acc'): val for metric, val in logs.items()}
-            logs = {metric.replace('loss', 'main_loss'): val for metric, val in logs.items()}
-
         score = logs[self.metric]
         if score <= self.best_score:
             return
@@ -187,10 +246,8 @@ class StudyLogger(Callback):
         """
         super(Callback, self).__init__()
 
-        self.X_abstract = X_abstract
-        self.X_summary = X_summary
-        self.exp_group = exp_group
-        self.exp_id = exp_id
+        self.X_abstract, self.X_summary = X_abstract, X_summary
+        self.exp_group, self.exp_id = exp_group, exp_id
 
         self.dump_loc = '../store/study_vecs/{}/{}.p'.format(self.exp_group, self.exp_id)
 

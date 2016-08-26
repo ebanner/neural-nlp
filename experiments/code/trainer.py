@@ -19,7 +19,7 @@ from keras.models import model_from_json
 from support import per_class_f1s, per_class_accs, stratified_batch_generator
 from loggers import weights, updates, update_ratios, gradients, activations
 
-from callbacks import Flusher, TensorLogger, CSVLogger, ProbaLogger, StudyLogger
+from callbacks import Flusher, TensorLogger, CSVLogger, ProbaLogger, StudyLogger, StudySimilarityLogger
 
 
 class Trainer:
@@ -156,9 +156,10 @@ class Trainer:
         sl = StudyLogger(self.vecs['abstracts'][train_idxs],
                          self.vecs['outcomes'][train_idxs],
                          self.exp_group, self.exp_id)
+        ss = StudySimilarityLogger(self.vecs, train_idxs)
 
         # filter down callbacks
-        cb_shorthands, cbs = ['cb', 'ce', 'fl', 'cv', 'es', 'sl'], [cb, ce, fl, cv, es, sl]
+        cb_shorthands, cbs = ['cb', 'ce', 'fl', 'es', 'sl', 'ss', 'cv'], [cb, ce, fl, es, sl, ss, cv]
         self.callbacks = [cb for cb_shorthand, cb in zip(cb_shorthands, cbs) if cb_shorthand in callback_set]
 
         if fit_generator:
