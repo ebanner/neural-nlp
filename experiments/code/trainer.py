@@ -142,9 +142,9 @@ class Trainer:
         # define callbacks
         weight_str = '../store/weights/{}/{}/{}-{}.h5'
         cb = ModelCheckpoint(weight_str.format(self.exp_group, self.exp_id, fold, metric),
-                             monitor='acc',
+                             monitor='loss',
                              save_best_only=True,
-                             mode='max')
+                             mode='min')
         ce = ModelCheckpoint(weight_str.format(self.exp_group, self.exp_id, fold, 'loss'),
                              monitor='loss', # every time training loss goes down
                              mode='min')
