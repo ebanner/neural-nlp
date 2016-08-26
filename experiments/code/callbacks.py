@@ -52,48 +52,48 @@ class StudySimilarityLogger(Callback):
         """
         super(Callback, self).__init__()
 
-        self.X_study, self.X_summary = vecs['abstracts'].X, vecs['outcomes'].X
+        self.X_study, self.X_summary = vecs['abstracts'][train_idxs], vecs['outcomes'][train_idxs]
         self.train_idxs = train_idxs
         self.phase = phase
         self.nb_study = nb_study
 
-        self.nb_train = len(self.X_study)
+        self.nb_train = len(train_idxs)
         assert len(self.X_summary) == self.nb_train
+
+        # load cdnos
+        df = pd.read_csv('../data/extra/study_inclusion.csv', index_col=0).iloc[train_idxs]
+        self.cdnos = df.cdno.astype('category').cat.codes
 
     def on_train_begin(self, logs={}):
         """Build keras function to produce vectorized studies
         
         Even though some tensors may not need all of these inputs, it doesn't
         hurt to include them for those that do.
-
-        Also load the dataframe which contains the cdnos.
         
         """
         inputs = self.model.inputs + [K.learning_phase()]
         outputs = self.model.get_layer('lstm_abstract').output
-        self.embed_studies = K.function(inputs, [outputs])
 
-        # load cdnos
-        df = pd.read_csv('../data/extra/study_inclusion.csv', index_col=0).ix[self.train_idxs]
-        self.cdnos = df.cdno.astype('category').cat.codes
+        self.embed_studies = K.function(inputs, [outputs])
 
     def on_epoch_end(self, epoch, logs={}):
         """Compute study similarity from the same review and different reviews"""
 
         subset = np.random.choice(self.nb_train, size=self.nb_study)
         X_study, X_summary = self.X_study[subset], self.X_summary[subset]
+        cdnos = self.cdnos.iloc[subset]
 
         TEST_MODE = 0 # learning phase of 0 for test mode (i.e. do *not* apply dropout)
-        study_vecs = self.embed_studies([X_study, X_summary, TEST_MODE])
+        study_vecs = self.embed_studies([X_study, X_summary, TEST_MODE])[0]
 
         similarity_scores = np.dot(study_vecs, study_vecs.T) # compute similarities
 
         # compute mean similarities between studies from same and different reviews
         nb_same = nb_different = 0
         same_sum = different_sum = 0
-        for i in range(self.nb_train):
-            for j in range(i+1, self.nb_train):
-                if self.cdnos.iloc[i] == self.cdnos.iloc[j]:
+        for i in range(self.nb_study):
+            for j in range(i+1, self.nb_study):
+                if cdnos.iloc[i] == cdnos.iloc[j]:
                     same_sum += similarity_scores[i][j]
                     nb_same += 1
                 else:
