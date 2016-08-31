@@ -37,24 +37,61 @@ class ValidationLogger(Callback):
         print 'scikit f1:', np.mean(f1s)
 
 class StudySimilarityLogger(Callback):
-    """Callback for computing study similarity during training"""
-
-    def __init__(self, X_study, X_summary, cdnos, phase=0, nb_study=1000):
-        """Save variables
+    """Callback for computing and inserting the study similarity during training
+    
+    The study similarity is defined as the mean similarity between studies in
+    the same review minus the mean similarity between studies in different
+    reviews.
+    
+    """
+    def __init__(self, X_study, X_summary, top_cdnos, cdnos, phase=0, nb_sample=1000):
+        """Save variables and sample study indices
 
         Parameters
         ----------
         X_study : vectorized studies
         X_summary : vectorized summaries
+        top_cdnos : set of `cdnos.unique()`
+        cdnos : mapping from study indexes to their cdno
         phase : 1 for train and 0 for test
-        nb_study : number of studies to send through
+        nb_sample : number of studies to evaluate
 
         """
         super(Callback, self).__init__()
 
         self.X_study, self.X_summary = X_study, X_summary
         self.phase = phase
-        self.cdnos = cdnos
+        self.top_cdnos, self.cdnos = top_cdnos, cdnos
+        self.nb_sample = nb_sample
+
+        nb_train = len(self.X_study)
+        assert len(self.X_summary) == nb_train
+
+        # sample study indices (and their corresponding cdnos)
+        study_idxs = np.random.choice(nb_train, size=self.nb_sample)
+        self.X_sample, self.X_dummy = X_study[study_idxs], X_summary[study_idxs]
+        sample_cdnos = cdnos[study_idxs].reset_index(drop=True)
+
+        # build dicts to sample corrupt and valid studies from
+        all_cdno_idxs = set(np.arange(nb_train))
+        cdno2corrupt_study_idxs, cdno2valid_study_idxs = {}, {}
+        for cdno in top_cdnos:
+            cdno_idxs = set(np.argwhere(cdnos == cdno).flatten())
+            cdno2valid_study_idxs[cdno], cdno2corrupt_study_idxs[cdno] = cdno_idxs, list(all_cdno_idxs - cdno_idxs)
+            
+        # build half-valid and half-corrupt target studies
+        self.X_target = np.zeros_like(self.X_sample)
+        valid_range, corrupt_range = range(nb_sample/2), range(nb_sample/2, nb_sample)
+        for i in valid_range:
+            valid_study_idxs = cdno2valid_study_idxs[sample_cdnos[i]]
+            valid_study_idxs = valid_study_idxs - set(sample_cdnos[i:i+1]) # remove study iteself from consideration
+            valid_study_idx = np.random.choice(list(valid_study_idxs))
+            self.X_target[i] = X_study[valid_study_idx]
+            
+        for j in corrupt_range:
+            corrupt_study_idxs = cdno2corrupt_study_idxs[sample_cdnos[j]]
+            corrupt_study_idx = np.random.choice(corrupt_study_idxs)
+            self.X_target[j] = X_study[corrupt_study_idx]
 
     def on_train_begin(self, logs={}):
         """Build keras function to produce vectorized studies
@@ -63,33 +100,23 @@ class StudySimilarityLogger(Callback):
         hurt to include them for those that do.
         
         """
+        # build keras function to get study embeddings
         inputs = self.model.inputs + [K.learning_phase()]
         outputs = self.model.get_layer('study_vec').output
-
         self.embed_studies = K.function(inputs, [outputs])
 
     def on_epoch_end(self, epoch, logs={}):
         """Compute study similarity from the same review and different reviews"""
 
-        study_vecs = self.embed_studies([self.X_study, self.X_summary, self.phase])[0]
+        study_vecs = self.embed_studies([self.X_sample, self.X_summary, self.phase])[0]
+        target_vecs = self.embed_studies([self.X_target, self.X_summary, self.phase])[0]
 
-        similarity_scores = np.dot(study_vecs, study_vecs.T) # compute similarities
+        score = np.sum(study_vecs*target_vecs, axis=1) # dot corresponding entries
+        same_study_mean = score[:self.nb_sample/2].mean()
+        different_study_mean = score[self.nb_sample/2:].mean()
 
-        # compute mean similarities between studies from same and different reviews
-        nb_same = nb_different = 0
-        same_sum = different_sum = 0
-        nb_study = len(self.cdnos)
-        for i in range(nb_study):
-            for j in range(i+1, nb_study):
-                if self.cdnos.iloc[i] == self.cdnos.iloc[j]:
-                    same_sum += similarity_scores[i][j]
-                    nb_same += 1
-                else:
-                    different_sum += similarity_scores[i][j]
-                    nb_different += 1
-                    
         # this should be high when we're doing well
-        logs['similarity_score'] = (same_sum/nb_same) - (different_sum/nb_different)
+        logs['similarity_score'] = same_study_mean - different_study_mean
 
 class TensorLogger(Callback):
     """Callback for monitoring value of tensors during training"""

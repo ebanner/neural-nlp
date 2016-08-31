@@ -151,7 +151,7 @@ class Trainer:
                              mode='min')
         ss = StudySimilarityLogger(self.vecs['abstracts'][train_idxs],
                                    self.vecs['outcomes'][train_idxs],
-                                   cdnos)
+                                   top_cdnos, cdnos)
         es = EarlyStopping(monitor='val_acc', patience=10, verbose=2, mode='max')
         fl = Flusher()
         cv = CSVLogger(self.exp_group, self.exp_id, self.hyperparam_dict, fold)
