@@ -132,11 +132,12 @@ class Trainer:
         open(model_loc, 'w').write(json_string)
 
     def train(self, train_idxs, val_idxs, nb_epoch, batch_size, nb_train,
-            nb_val, callback_set, fold, metric, fit_generator):
+            nb_val, callback_set, fold, metric, fit_generator, top_cdnos, cdnos):
         """Set up callbacks and start training"""
 
         # train and validation sets
         train_idxs, val_idxs = train_idxs[:nb_train], val_idxs[:nb_val]
+        nb_train, nb_val = len(train_idxs), len(val_idxs)
         X_train, X_val = [X[train_idxs] for X in self.vecs.values()], [X[val_idxs] for X in self.vecs.values()]
 
         # define callbacks
@@ -148,6 +149,9 @@ class Trainer:
         ce = ModelCheckpoint(weight_str.format(self.exp_group, self.exp_id, fold, 'loss'),
                              monitor='loss', # every time training loss goes down
                              mode='min')
+        ss = StudySimilarityLogger(self.vecs['abstracts'][train_idxs],
+                                   self.vecs['outcomes'][train_idxs],
+                                   cdnos)
         es = EarlyStopping(monitor='val_acc', patience=10, verbose=2, mode='max')
         fl = Flusher()
         cv = CSVLogger(self.exp_group, self.exp_id, self.hyperparam_dict, fold)
@@ -156,35 +160,26 @@ class Trainer:
         sl = StudyLogger(self.vecs['abstracts'][train_idxs],
                          self.vecs['outcomes'][train_idxs],
                          self.exp_group, self.exp_id)
-        ss = StudySimilarityLogger(self.vecs, train_idxs)
 
         # filter down callbacks
-        cb_shorthands, cbs = ['cb', 'ce', 'fl', 'es', 'sl', 'ss', 'cv'], [cb, ce, fl, es, sl, ss, cv]
+        cb_shorthands, cbs = ['cb', 'ce', 'ss', 'fl', 'es', 'sl', 'cv'], [cb, ce, ss, fl, es, sl, cv]
         self.callbacks = [cb for cb_shorthand, cb in zip(cb_shorthands, cbs) if cb_shorthand in callback_set]
 
         if fit_generator:
-            # construct y_val
-            y_val = np.zeros(nb_val)
-            y_val[:nb_val/2] = 1 # first half are true
-
-            # validation set
-            X_abstract = self.vecs['abstracts'][val_idxs]
-            corrupt_idxs = val_idxs[nb_val/2:]
-            val_idxs[nb_val/2:] = np.random.permutation(corrupt_idxs) # corrupt second half
-            X_summary = self.vecs['outcomes'][val_idxs]
-
             # create batch generator
             from support import pair_generator
             gen_pairs = pair_generator(self.vecs['abstracts'][train_idxs],
                                        self.vecs['outcomes'][train_idxs],
-                                       batch_size)
+                                       batch_size,
+                                       top_cdnos,
+                                       cdnos)
 
             self.model.fit_generator(gen_pairs,
-                                     samples_per_epoch=batch_size,
+                                     samples_per_epoch=batch_size, # small, frequent epochs
                                      nb_epoch=nb_epoch,
                                      verbose=2,
                                      callbacks=self.callbacks,
-                                     validation_data=([X_abstract, X_summary], y_val))
+                                     max_q_size=1)
         else:
             y_train, y_val = self.y_train[train_idxs], self.y_train[val_idxs]
 

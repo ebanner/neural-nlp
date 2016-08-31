@@ -39,7 +39,7 @@ class ValidationLogger(Callback):
 class StudySimilarityLogger(Callback):
     """Callback for computing study similarity during training"""
 
-    def __init__(self, vecs, train_idxs, phase=1, nb_study=1000):
+    def __init__(self, X_study, X_summary, cdnos, phase=0, nb_study=1000):
         """Save variables
 
         Parameters
@@ -52,22 +52,9 @@ class StudySimilarityLogger(Callback):
         """
         super(Callback, self).__init__()
 
-        self.X_study, self.X_summary = vecs['abstracts'][train_idxs], vecs['outcomes'][train_idxs]
-        self.train_idxs = train_idxs
+        self.X_study, self.X_summary = X_study, X_summary
         self.phase = phase
-        self.nb_study = nb_study
-
-        self.nb_train = len(train_idxs)
-        assert len(self.X_summary) == self.nb_train
-
-        # load cdnos
-        df = pd.read_csv('../data/extra/study_inclusion.csv', index_col=0).iloc[train_idxs]
-        self.cdnos = df.cdno.astype('category').cat.codes
-
-        # pick random subset of training data
-        subset = np.random.choice(self.nb_train, size=self.nb_study)
-        self.X_study, self.X_summary = self.X_study[subset], self.X_summary[subset]
-        self.cdnos = self.cdnos.iloc[subset]
+        self.cdnos = cdnos
 
     def on_train_begin(self, logs={}):
         """Build keras function to produce vectorized studies
@@ -77,23 +64,23 @@ class StudySimilarityLogger(Callback):
         
         """
         inputs = self.model.inputs + [K.learning_phase()]
-        outputs = self.model.get_layer('lstm_abstract').output
+        outputs = self.model.get_layer('study_vec').output
 
         self.embed_studies = K.function(inputs, [outputs])
 
     def on_epoch_end(self, epoch, logs={}):
         """Compute study similarity from the same review and different reviews"""
 
-        TEST_MODE = 0 # learning phase of 0 for test mode (i.e. do *not* apply dropout)
-        study_vecs = self.embed_studies([self.X_study, self.X_summary, TEST_MODE])[0]
+        study_vecs = self.embed_studies([self.X_study, self.X_summary, self.phase])[0]
 
         similarity_scores = np.dot(study_vecs, study_vecs.T) # compute similarities
 
         # compute mean similarities between studies from same and different reviews
         nb_same = nb_different = 0
         same_sum = different_sum = 0
-        for i in range(self.nb_study):
-            for j in range(i+1, self.nb_study):
+        nb_study = len(self.cdnos)
+        for i in range(nb_study):
+            for j in range(i+1, nb_study):
                 if self.cdnos.iloc[i] == self.cdnos.iloc[j]:
                     same_sum += similarity_scores[i][j]
                     nb_same += 1
@@ -101,8 +88,8 @@ class StudySimilarityLogger(Callback):
                     different_sum += similarity_scores[i][j]
                     nb_different += 1
                     
-        logs['same_mean'] = same_sum / nb_same
-        logs['different_mean'] = different_sum / nb_different
+        # this should be high when we're doing well
+        logs['similarity_score'] = (same_sum/nb_same) - (different_sum/nb_different)
 
 class TensorLogger(Callback):
     """Callback for monitoring value of tensors during training"""
@@ -193,8 +180,8 @@ class CSVLogger(Callback):
         frame = {metric: [val] for metric, val in logs.items()}
         pd.DataFrame(frame).to_csv(self.train_path,
                                    index=False,
-                                   mode='a', # keep appending to this csv
-                                   header=epoch==0 and not os.path.isfile(self.train_path))
+                                   mode='a' if epoch > 0 else 'w', # overwrite if starting anew if starting anwe
+                                   header=epoch==0)
 
 class ProbaLogger(Callback):
     """Callback for dumping info for error-analysis
@@ -232,8 +219,11 @@ class ProbaLogger(Callback):
         pickle.dump(y_proba, open(self.proba_loc, 'wb'))
 
 class StudyLogger(Callback):
-    """Callback for dumping study vectors at the end of training"""
-
+    """Callback for dumping study embeddings
+    
+    Dump study vectors every time we reach a new best for study similarity.
+    
+    """
     def __init__(self, X_abstract, X_summary, exp_group, exp_id):
         """Save variables
 
@@ -251,17 +241,22 @@ class StudyLogger(Callback):
         self.exp_group, self.exp_id = exp_group, exp_id
 
         self.dump_loc = '../store/study_vecs/{}/{}.p'.format(self.exp_group, self.exp_id)
+        self.max_score = -np.inf # study similarity score (computed in StudySimilarityLogger)
 
     def on_train_begin(self, logs={}):
-        """Create function to dump abstracts"""
+        """Define keras function for computing study embeddings"""
 
         inputs = self.model.inputs + [K.learning_phase()]
-        outputs = self.model.get_layer('lstm_abstract').output
+        outputs = self.model.get_layer('study_vec').output
 
-        self.embed_abstracts = K.function(inputs, [outputs])
+        self.embed_abstracts = K.function(inputs, [outputs]) # don't need summary to compute study embedding
 
-    def on_train_end(self, logs={}):
+    def on_epoch_end(self, epoch, logs={}):
         """Run all abstracts through model and dump the embeddings"""
+
+        score = logs['similarity_score']
+        if score < self.max_score:
+            return # only log study vectors when we reach a new best similarity score
 
         TEST_MODE = 0 # learning phase of 0 for test mode (i.e. do *not* apply dropout)
         abstract_vecs = self.embed_abstracts([self.X_abstract, self.X_summary, TEST_MODE])
