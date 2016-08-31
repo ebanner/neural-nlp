@@ -2,6 +2,7 @@ from collections import OrderedDict
 
 from keras.layers import Input, Embedding, Dropout, Dense, LSTM, merge
 from keras.layers import Convolution1D, MaxPooling1D, Flatten, merge
+from keras.layers import Activation
 from keras.models import Model
 
 from trainer import Trainer
@@ -40,7 +41,7 @@ class CNNTrainer(Trainer):
 
         self.model = Model(input=input, output=probs)
 
-class SiameseTrainer(Trainer):
+class LSTMSiameseTrainer(Trainer):
     """Two-input model which embeds abstract and summary
     
     Either push them apart or pull them together depending on label. Currently
@@ -49,6 +50,8 @@ class SiameseTrainer(Trainer):
     However, by not sharing weights, we could be missing out on synonyms for
     words used in the summary which are not used in the abstract, which could
     help us learn better word vectors and filters.
+
+    Embeds study and summary with an LSTM. Take the last vector.
     
     """
     def build_model(self, nb_filter, filter_lens, nb_hidden, hidden_dim,
@@ -61,7 +64,7 @@ class SiameseTrainer(Trainer):
                                       input_length=self.vecs['abstracts'].maxlen,
                                       mask_zero=True,
                                       weights=None)(abstract)
-        abstract_vec = LSTM(output_dim=hidden_dim, name='lstm_abstract')(embedded_abstract)
+        abstract_vec = LSTM(output_dim=hidden_dim, name='study_vec')(embedded_abstract)
 
         # summary vec
         summary = Input(shape=[self.vecs['outcomes'].maxlen], dtype='int32')
@@ -72,9 +75,61 @@ class SiameseTrainer(Trainer):
                                       weights=None)(summary)
         summary_vec = LSTM(output_dim=hidden_dim)(embedded_summary)
 
-        # dot vectors
+        # dot vectors and send through sigmoid
+        score = merge(inputs=[abstract_vec, summary_vec],
+                      mode='dot',
+                      dot_axes=1) # won't work without `dot_axes=1` (!!)
+        prob = Activation('sigmoid')(score)
+
+        self.model = Model(input=[abstract, summary], output=score)
+
+class CNNSiameseTrainer(Trainer):
+    """Two-input model which embeds abstract and summary
+    
+    Either push them apart or pull them together depending on label. Currently
+    the abstracts and summaries do not share any weights. I think this makes
+    sense as what we really care about is processing abstracts, not summaries.
+    However, by not sharing weights, we could be missing out on synonyms for
+    words used in the summary which are not used in the abstract, which could
+    help us learn better word vectors and filters.
+
+    Embeds the study and summary with a CNN.
+    
+    """
+    def build_model(self, nb_filter, filter_lens, nb_hidden, hidden_dim,
+            dropout_prob, dropout_emb, backprop_emb, word2vec_init):
+
+        # abstract vec
+        abstract = Input(shape=[self.vecs['abstracts'].maxlen], dtype='int32')
+        embedded_abstract = Embedding(output_dim=self.vecs['abstracts'].word_dim,
+                                      input_dim=self.vecs['abstracts'].vocab_size,
+                                      input_length=self.vecs['abstracts'].maxlen,
+                                      weights=None)(abstract)
+        abstract_vec = cnn_embed(embedded_abstract,
+                                 filter_lens,
+                                 nb_filter,
+                                 self.vecs['abstracts'].maxlen,
+                                 name='study')
+        abstract_vec = Dropout(0.5)(abstract_vec)
+
+        # summary vec
+        summary = Input(shape=[self.vecs['outcomes'].maxlen], dtype='int32')
+        embedded_summary = Embedding(output_dim=self.vecs['outcomes'].word_dim,
+                                      input_dim=self.vecs['outcomes'].vocab_size,
+                                      input_length=self.vecs['outcomes'].maxlen,
+                                      weights=None)(summary)
+        summary_vec = cnn_embed(embedded_summary,
+                                filter_lens,
+                                nb_filter,
+                                self.vecs['outcomes'].maxlen,
+                                name='summary')
+        summary_vec = Dropout(0.5)(summary_vec)
+
+        # dot vectors and send through sigmoid
         score = merge(inputs=[abstract_vec, summary_vec],
                       mode='dot',
                       dot_axes=1) # won't work without `dot_axes=1` (!!)
 
-        self.model = Model(input=[abstract, summary], output=score)
+        prob = Activation('sigmoid')(score)
+
+        self.model = Model(input=[abstract, summary], output=prob)
