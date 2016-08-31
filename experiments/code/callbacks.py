@@ -64,6 +64,11 @@ class StudySimilarityLogger(Callback):
         df = pd.read_csv('../data/extra/study_inclusion.csv', index_col=0).iloc[train_idxs]
         self.cdnos = df.cdno.astype('category').cat.codes
 
+        # pick random subset of training data
+        subset = np.random.choice(self.nb_train, size=self.nb_study)
+        self.X_study, self.X_summary = self.X_study[subset], self.X_summary[subset]
+        self.cdnos = self.cdnos.iloc[subset]
+
     def on_train_begin(self, logs={}):
         """Build keras function to produce vectorized studies
         
@@ -79,12 +84,8 @@ class StudySimilarityLogger(Callback):
     def on_epoch_end(self, epoch, logs={}):
         """Compute study similarity from the same review and different reviews"""
 
-        subset = np.random.choice(self.nb_train, size=self.nb_study)
-        X_study, X_summary = self.X_study[subset], self.X_summary[subset]
-        cdnos = self.cdnos.iloc[subset]
-
         TEST_MODE = 0 # learning phase of 0 for test mode (i.e. do *not* apply dropout)
-        study_vecs = self.embed_studies([X_study, X_summary, TEST_MODE])[0]
+        study_vecs = self.embed_studies([self.X_study, self.X_summary, TEST_MODE])[0]
 
         similarity_scores = np.dot(study_vecs, study_vecs.T) # compute similarities
 
@@ -93,7 +94,7 @@ class StudySimilarityLogger(Callback):
         same_sum = different_sum = 0
         for i in range(self.nb_study):
             for j in range(i+1, self.nb_study):
-                if cdnos.iloc[i] == cdnos.iloc[j]:
+                if self.cdnos.iloc[i] == self.cdnos.iloc[j]:
                     same_sum += similarity_scores[i][j]
                     nb_same += 1
                 else:
