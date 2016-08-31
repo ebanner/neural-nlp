@@ -10,7 +10,7 @@ import pandas as pd
 
 from sklearn.cross_validation import KFold
 
-from trainers import CNNTrainer, SiameseTrainer
+from trainers import CNNTrainer, CNNSiameseTrainer, LSTMSiameseTrainer
 
 
 @plac.annotations(
@@ -41,6 +41,7 @@ from trainers import CNNTrainer, SiameseTrainer
         labels=('labels to use', 'option', None, str),
         fit_generator=('whether to use a fit generator', 'option', None, str),
         loss=('type of loss to use', 'option', None, str),
+        top_k=('the number of reviews with the most studies to use for training data', 'option', None, int),
 )
 def main(exp_group='', exp_id='', nb_epoch=5, nb_filter=1000, filter_lens='1,2,3', 
         nb_hidden=1, hidden_dim=1024, dropout_prob=.5, dropout_emb='True', reg=0,
@@ -48,7 +49,7 @@ def main(exp_group='', exp_id='', nb_epoch=5, nb_filter=1000, filter_lens='1,2,3
         nb_val=1000000, n_folds=5, optimizer='adam', lr=.001,
         do_cv='False', metric='val_main_acc', callbacks='cb,ce,fl,cv,es',
         trainer='CNNTrainer', features='', inputs='abstracts,outcomes', labels='outcomes',
-        fit_generator='False', loss='binary_crossentropy'):
+        fit_generator='False', loss='binary_crossentropy', top_k=2):
     """Training process
 
     1. Parse command line arguments
@@ -83,22 +84,23 @@ def main(exp_group='', exp_id='', nb_epoch=5, nb_filter=1000, filter_lens='1,2,3
     trainer.load_auxiliary(features)
     trainer.load_labels(labels)
 
-    # set up fold(s)
-    folds = KFold(trainer.nb_train, n_folds, shuffle=True, random_state=1337) # for reproducibility!
-    if not do_cv:
-        folds = list(folds)[:1] # only do the first fold if not doing cross-valiadtion
+    # model
+    trainer.build_model(nb_filter, filter_lens, nb_hidden, hidden_dim, dropout_prob,
+            dropout_emb, backprop_emb, word2vec_init)
+    trainer.compile_model(metric, optimizer, lr, loss)
+    trainer.save_architecture()
 
-    # cross-fold training
-    for fold_idx, (train_idxs, val_idxs) in enumerate(folds):
-        # model
-        trainer.build_model(nb_filter, filter_lens, nb_hidden, hidden_dim,
-                dropout_prob, dropout_emb, backprop_emb, word2vec_init)
-        trainer.compile_model(metric, optimizer, lr, loss)
-        trainer.save_architecture()
+    # get study indices to train on based on k most popular reviews
+    df = pd.read_csv('../data/extra/pico_cdsr.csv', index_col=0)
+    top_cdnos = set(df.groupby('cdno').size().sort_values(ascending=False).index[:top_k])
+    df = df[df.cdno.map(lambda cdno: cdno in top_cdnos)] # throw out studies we are not using
+    train_idxs = np.array(df.index) # get study indices so we can index into vectorized data
+    cdnos = df.reset_index(drop=True).cdno # get cdnos so we can map studies to their cdno
 
-        # train
-        history = trainer.train(train_idxs, val_idxs, nb_epoch, batch_size,
-                nb_train, nb_val, callbacks, fold_idx, metric, fit_generator)
+    # train
+    fold_idx = 0 # legacy
+    history = trainer.train(train_idxs, train_idxs, nb_epoch, batch_size, # use train_idxs as val_idxs
+            nb_train, nb_val, callbacks, fold_idx, metric, fit_generator, top_cdnos, cdnos)
 
 
 if __name__ == '__main__':
