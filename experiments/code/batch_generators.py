@@ -1,6 +1,6 @@
 # batch generators
 
-def pair_generator(self, nb_train, cdnos, top_cdnos, nb_sample=128, phase=0, exact_only=False):
+def pair_generator(nb_train, cdnos, top_cdnos, nb_sample=128, phase=0, exact_only=False):
     """Generator for generating batches of source_idxs to target_idxs
 
     Parameters
@@ -35,21 +35,25 @@ def pair_generator(self, nb_train, cdnos, top_cdnos, nb_sample=128, phase=0, exa
             for cdno in top_cdnos:
                 cdno_idxs = set(np.argwhere(cdnos == cdno).flatten())
                 cdno2valid_study_idxs[cdno] = cdno_idxs
-
+                
             # find study idxs in the same study
-            for i in range(nb_sample/2): # valid range
-                valid_study_idxs = cdno2valid_study_idxs[sample_cdnos[i]]
-                valid_study_idxs = valid_study_idxs - set(sample_cdnos[i:i+1]) # remove study iteself from consideration
+            valid_range = range(nb_sample/2)
+            for i, study_idx in zip(valid_range, study_idxs[:nb_sample/2]):
+                cdno = cdnos[study_idx]
+                valid_study_idxs = cdno2valid_study_idxs[cdno]
+                valid_study_idxs = valid_study_idxs - set([study_idx]) # remove study iteself from consideration
                 valid_study_idx = np.random.choice(list(valid_study_idxs))
-                target_idxs[i] = X_study[valid_study_idx]
-            
+                target_idxs[i] = valid_study_idx
+                
         # always compute corrupt idxs same way
-        for j in range(nb_sample/2, nb_sample): # corrupt range
-            corrupt_study_idxs = cdno2corrupt_study_idxs[sample_cdnos[j]]
+        corrupt_range = range(nb_sample/2, nb_sample)
+        for j, study_idx in zip(corrupt_range, study_idxs[nb_sample/2:]):
+            cdno = cdnos[study_idx]
+            corrupt_study_idxs = cdno2corrupt_study_idxs[cdno]
             corrupt_study_idx = np.random.choice(corrupt_study_idxs)
-            target_idxs[j] = X_study[corrupt_study_idx]
+            target_idxs[j] = corrupt_study_idx
 
-        yield [study_idxs, target_idxs], y
+        yield study_idxs, target_idxs
 
 def study_summary_generator(**kwargs):
     """Wrapper generator around pair_generator() for yielding batches of
@@ -61,8 +65,9 @@ def study_summary_generator(**kwargs):
     """
     study_summary_batch = pair_generator(nb_train=len(kwargs['X_summary']), exact_only=True, **kwargs)
 
+    nb_sample = kwargs['nb_sample']
     y = np.zeros(nb_sample)
-    y[:nb_sample/2] = 1 # first half of samples are good
+    y[:nb_sample/2] = 1 # first half of samples are good always
 
     X_study, X_summay = kwargs['X_study'], kwargs['X_summary']
     while True:
