@@ -131,8 +131,8 @@ class Trainer:
         model_loc = '../store/models/{}/{}.json'.format(self.exp_group, self.exp_id)
         open(model_loc, 'w').write(json_string)
 
-    def train(self, train_idxs, val_idxs, nb_epoch, batch_size, nb_train,
-            nb_val, callback_set, fold, metric, fit_generator, top_cdnos, cdnos):
+    def train(self, train_idxs, val_idxs, nb_epoch, batch_size, nb_train, nb_val,
+            callback_set, fold, metric, fit_generator, top_cdnos, cdnos, nb_sample):
         """Set up callbacks and start training"""
 
         # train and validation sets
@@ -151,12 +151,12 @@ class Trainer:
                              mode='min')
         ss = StudySimilarityLogger(self.vecs['abstracts'][train_idxs],
                                    self.vecs['outcomes'][train_idxs],
-                                   top_cdnos, cdnos)
+                                   top_cdnos, cdnos, nb_sample)
         es = EarlyStopping(monitor='val_acc', patience=10, verbose=2, mode='max')
         fl = Flusher()
         cv = CSVLogger(self.exp_group, self.exp_id, self.hyperparam_dict, fold)
         # pl = ProbaLogger(self.exp_group, self.exp_id, X_val, self.nb_train, self.nb_class, batch_size, metric)
-        # tl = TensorLogger(X_train, y_train, tensor_funcs=[weights, updates, update_ratios, gradients, activations])
+        tl = TensorLogger(X_train, y_train, tensor_funcs=[weights, updates, update_ratios, gradients, activations])
         sl = StudyLogger(self.vecs['abstracts'][train_idxs],
                          self.vecs['outcomes'][train_idxs],
                          self.exp_group, self.exp_id)
@@ -167,15 +167,16 @@ class Trainer:
 
         if fit_generator:
             # create batch generator
-            from support import pair_generator
-            gen_pairs = pair_generator(self.vecs['abstracts'][train_idxs],
-                                       self.vecs['outcomes'][train_idxs],
-                                       batch_size,
-                                       top_cdnos,
-                                       cdnos)
+            from batch_generators import study_summary_generator
+            gen_study_summary_batches = \
+                    study_summary_generator(X_study=self.vecs['abstracts'][train_idxs],
+                                            X_summary=self.vecs['outcomes'][train_idxs],
+                                            nb_sample=batch_size,
+                                            cdnos=cdnos,
+                                            top_cdnos=top_cdnos)
 
-            self.model.fit_generator(gen_pairs,
-                                     samples_per_epoch=batch_size, # small, frequent epochs
+            self.model.fit_generator(gen_study_summary_batches,
+                                     samples_per_epoch=batch_size, # small frequent epochs
                                      nb_epoch=nb_epoch,
                                      verbose=2,
                                      callbacks=self.callbacks,

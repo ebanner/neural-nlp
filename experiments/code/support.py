@@ -123,7 +123,7 @@ def stratified_batch_generator(X_train, y_train, batch_size, mb_ratios, num_clas
 
         yield X_train[batch_idxs], to_categorical(y_train[batch_idxs])
 
-def cnn_embed(words, filter_lens, nb_filter, max_doclen, name):
+def cnn_embed(words, filter_lens, nb_filter, max_doclen, reg, name):
     """Add conv -> max_pool -> flatten for each filter length
     
     Parameters
@@ -132,6 +132,7 @@ def cnn_embed(words, filter_lens, nb_filter, max_doclen, name):
     filter_lens : list of n-gram filers to run over `words`
     nb_filter : number of each ngram filters to use
     max_doclen : length of the document
+    reg : regularization strength
     name : name to give the merged vector
     
     """
@@ -141,7 +142,8 @@ def cnn_embed(words, filter_lens, nb_filter, max_doclen, name):
     for i, filter_len in enumerate(filter_lens):
         convolved = Convolution1D(nb_filter=nb_filter,
                                   filter_length=filter_len,
-                                  activation='relu')(words)
+                                  activation='relu',
+                                  W_regularizer=l2(reg))(words)
 
         max_pooled = MaxPooling1D(pool_length=max_doclen-filter_len+1)(convolved) # max-1 pooling
         flattened = Flatten()(max_pooled)
@@ -149,43 +151,3 @@ def cnn_embed(words, filter_lens, nb_filter, max_doclen, name):
         activations[i] = flattened
 
     return merge(activations, mode='concat', name='{}_vec'.format(name)) if len(filter_lens) > 1 else flattened
-
-def pair_generator(X_abstract, X_summary, batch_size, top_cdnos, cdnos):
-    """Yields batches of valid and corrupt (abstract, summary) pairs to train on
-    
-    Parameters
-    ----------
-    X_abstract : vectorized abstracts
-    X_summary : vectorized summaries
-    batch_size : number of samples per batch
-    top_cdnos : just `cdnos`.unique()
-    cdnos : list the same size as X_abstracts and X_summary containing the cdno
-    they belong to
-    
-    Half of the samples will be valid (abstract, summary) pairs and the second
-    half will be corrupt (abstract, summary') pairs. We take the computational
-    hit to ensure that the corrupt segment is indeed corrupt.
-    
-    """
-    nb_train = len(X_abstract)
-    assert nb_train == len(X_summary)
-
-    # build dict to sample corrupt summaries from
-    all_cdno_idxs, cdno2corrupt_study_idxs = set(np.arange(nb_train)), {}
-    for cdno in top_cdnos:
-        cdno_idxs = set(np.argwhere(cdnos == cdno).flatten())
-        cdno2corrupt_study_idxs[cdno] = list(all_cdno_idxs - cdno_idxs)
-
-    y = np.zeros(batch_size)
-    y[:batch_size/2] = 1 # first half of the samples will be good - second half will be corrupt
-
-    while True:
-        abstract_idxs = np.random.choice(nb_train, size=batch_size)
-
-        summary_idxs = np.copy(abstract_idxs)
-        for i in range(batch_size/2, batch_size): # corrupt second half of summary idxs
-            cdno = cdnos[abstract_idxs[i]]
-            corrupt_summary_idxs = cdno2corrupt_study_idxs[cdno]
-            summary_idxs[i] = np.random.choice(corrupt_summary_idxs)
-
-        yield [X_abstract[abstract_idxs], X_summary[summary_idxs]], y

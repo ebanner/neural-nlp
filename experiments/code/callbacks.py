@@ -44,7 +44,7 @@ class StudySimilarityLogger(Callback):
     reviews.
     
     """
-    def __init__(self, X_study, X_summary, top_cdnos, cdnos, phase=0, nb_sample=1000):
+    def __init__(self, X_study, X_summary, top_cdnos, cdnos, nb_sample=1000, phase=0):
         """Save variables and sample study indices
 
         Parameters
@@ -53,45 +53,23 @@ class StudySimilarityLogger(Callback):
         X_summary : vectorized summaries
         top_cdnos : set of `cdnos.unique()`
         cdnos : mapping from study indexes to their cdno
-        phase : 1 for train and 0 for test
         nb_sample : number of studies to evaluate
+        phase : 1 for train and 0 for test
 
         """
         super(Callback, self).__init__()
 
         self.X_study, self.X_summary = X_study, X_summary
         self.phase = phase
-        self.top_cdnos, self.cdnos = top_cdnos, cdnos
-        self.nb_sample = nb_sample
 
-        nb_train = len(self.X_study)
-        assert len(self.X_summary) == nb_train
+        from batch_generators import pair_generator
+        study_study_pairs = pair_generator(nb_train=len(X_study),
+                                           cdnos=cdnos,
+                                           top_cdnos=top_cdnos),
+                                           nb_sample=1000,
+                                           exact_only=False)
 
-        # sample study indices (and their corresponding cdnos)
-        study_idxs = np.random.choice(nb_train, size=self.nb_sample)
-        self.X_sample, self.X_dummy = X_study[study_idxs], X_summary[study_idxs]
-        sample_cdnos = cdnos[study_idxs].reset_index(drop=True)
-
-        # build dicts to sample corrupt and valid studies from
-        all_cdno_idxs = set(np.arange(nb_train))
-        cdno2corrupt_study_idxs, cdno2valid_study_idxs = {}, {}
-        for cdno in top_cdnos:
-            cdno_idxs = set(np.argwhere(cdnos == cdno).flatten())
-            cdno2valid_study_idxs[cdno], cdno2corrupt_study_idxs[cdno] = cdno_idxs, list(all_cdno_idxs - cdno_idxs)
-            
-        # build half-valid and half-corrupt target studies
-        self.X_target = np.zeros_like(self.X_sample)
-        valid_range, corrupt_range = range(nb_sample/2), range(nb_sample/2, nb_sample)
-        for i in valid_range:
-            valid_study_idxs = cdno2valid_study_idxs[sample_cdnos[i]]
-            valid_study_idxs = valid_study_idxs - set(sample_cdnos[i:i+1]) # remove study iteself from consideration
-            valid_study_idx = np.random.choice(list(valid_study_idxs))
-            self.X_target[i] = X_study[valid_study_idx]
-            
-        for j in corrupt_range:
-            corrupt_study_idxs = cdno2corrupt_study_idxs[sample_cdnos[j]]
-            corrupt_study_idx = np.random.choice(corrupt_study_idxs)
-            self.X_target[j] = X_study[corrupt_study_idx]
+        self.source_idxs, self.target_idxs = next(study_study_pairs)
 
     def on_train_begin(self, logs={}):
         """Build keras function to produce vectorized studies
@@ -108,10 +86,10 @@ class StudySimilarityLogger(Callback):
     def on_epoch_end(self, epoch, logs={}):
         """Compute study similarity from the same review and different reviews"""
 
-        study_vecs = self.embed_studies([self.X_sample, self.X_summary, self.phase])[0]
-        target_vecs = self.embed_studies([self.X_target, self.X_summary, self.phase])[0]
+        source_vecs = self.embed_studies([self.X_study[self.source_idxs], self.X_summary, self.phase])[0]
+        target_vecs = self.embed_studies([self.X_study[self.target_idxs], self.X_summary, self.phase])[0]
 
-        score = np.sum(study_vecs*target_vecs, axis=1) # dot corresponding entries
+        score = np.sum(source_vecs*target_vecs, axis=1) # dot corresponding entries
         same_study_mean = score[:self.nb_sample/2].mean()
         different_study_mean = score[self.nb_sample/2:].mean()
 
@@ -128,19 +106,19 @@ class TensorLogger(Callback):
         ----------
         X_train : training data
         y_train : training labels
-        tensor_funcs : list of functions which take a keras model and produce two lists of names and tensors to monitor
-        filters : list of names to filter tensors by
-        phase : 0 for test phase and 1 for learning phase
+        tensor_funcs : list of functions which take a keras model and produce tensors as well as their names
+        phase : 0 for test phase and 1 for learning phase (defaults to 1 because
+        we may want to examine number of neurons surviving dropout, for instance)
 
-        Note: `tensor_funcs` is a hack because the optimizers's updates don't
-        become available until keras does magic in fit(). Hence we need to call
-        these functions and get these tensors after training has already
-        started.
+        Note: `tensor_funcs` is a hack. Ideally we would just pass the tensors
+        themselves, but tensors owned by the optimizer (e.g. update tensors)
+        don't become available until keras does some magic in fit(). Hence we
+        work around this by providing functions that will return tensors instead
+        of the tensors themselves.
 
         """
         super(Callback, self).__init__()
 
-        self.X_train, self.y_train = X_train, y_train
         self.phase, self.batch_size = phase, batch_size
 
         self.tensor_funcs = tensor_funcs
@@ -148,8 +126,13 @@ class TensorLogger(Callback):
         self.tensors, self.names = [], []
         self.values = {} # logging dict
 
+        # sample random subset of the training data for computing tensors
+        nb_train = len(X_train)
+        subset = np.random.choice(nb_train, size=batch_size)
+        self.X_train, self.y_train = [X[subset] for X in X_train], y_train[subset]
+
     def on_train_begin(self, logs={}):
-        """Build keras function to evaluate all tensors at once
+        """Build keras function to evaluate all tensors in one call
         
         Even though some tensors may not need all of these inputs, it doesn't
         hurt to include them for those that do.
@@ -161,10 +144,10 @@ class TensorLogger(Callback):
             for name in names:
                 self.values[name] = []
 
-        inputs, output = self.model.inputs, self.model.targets[0]
-        sample_weights, learning_phase = self.model.sample_weights[0], K.learning_phase()
-        self.eval_tensors = K.function(inputs=inputs+[output, sample_weights, learning_phase],
-                                       outputs=self.tensors)
+        inputs = self.model.inputs
+        labels, sample_weights = self.model.targets[0], self.model.sample_weights[0] # needed to compute gradient/update tensors
+        learning_phase = K.learning_phase() # needed to compute forward pass (e.g. dropout)
+        self.eval_tensors = K.function(inputs=inputs+[labels, sample_weights, learning_phase], outputs=self.tensors)
 
     def on_epoch_end(self, epoch, logs={}):
         """Evaluate tensors and log their values
@@ -173,10 +156,10 @@ class TensorLogger(Callback):
         compute this tensors. The subset differs each epoch.
         
         """
-        subset = np.random.choice(len(self.X_train), size=self.batch_size)
-        X_train, y_train = self.X_train[subset], self.y_train[subset]
-
-        tensor_vals = self.eval_tensors([X_train, y_train, np.ones(self.batch_size), self.phase])
+        tensor_vals = self.eval_tensors([self.X_train,
+                                         self.y_train,
+                                         np.ones(self.batch_size), # each sample has the same weight
+                                         self.phase])
 
         for tensor_val, name in zip(tensor_vals, self.names):
             self.values[name] += [float(tensor_val)]
