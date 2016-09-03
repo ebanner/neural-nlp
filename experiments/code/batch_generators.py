@@ -1,4 +1,5 @@
-# batch generators
+import numpy as np
+
 
 def pair_generator(nb_train, cdnos, top_cdnos, nb_sample=128, phase=0, exact_only=False):
     """Generator for generating batches of source_idxs to target_idxs
@@ -55,7 +56,7 @@ def pair_generator(nb_train, cdnos, top_cdnos, nb_sample=128, phase=0, exact_onl
 
         yield study_idxs, target_idxs
 
-def study_summary_generator(**kwargs):
+def study_summary_generator(X_study, X_summary, cdnos, top_cdnos, nb_sample=128, phase=0, exact_only=False):
     """Wrapper generator around pair_generator() for yielding batches of
     ([study, summary], y) pairs.
 
@@ -63,13 +64,10 @@ def study_summary_generator(**kwargs):
     and second half are of the form ([study, summary-from-different-review], y).
 
     """
-    study_summary_batch = pair_generator(nb_train=len(kwargs['X_summary']), exact_only=True, **kwargs)
-
-    nb_sample = kwargs['nb_sample']
-    y = np.zeros(nb_sample)
+    y = np.zeros(nb_sample, dtype=np.int)
     y[:nb_sample/2] = 1 # first half of samples are good always
 
-    X_study, X_summay = kwargs['X_study'], kwargs['X_summary']
+    study_summary_batch = pair_generator(nb_train=len(X_study), cdnos=cdnos, top_cdnos=top_cdnos, exact_only=True)
     while True:
         study_idxs, summary_idxs = next(study_summary_batch)
 

@@ -156,24 +156,27 @@ class Trainer:
         fl = Flusher()
         cv = CSVLogger(self.exp_group, self.exp_id, self.hyperparam_dict, fold)
         # pl = ProbaLogger(self.exp_group, self.exp_id, X_val, self.nb_train, self.nb_class, batch_size, metric)
-        tl = TensorLogger(X_train, y_train, tensor_funcs=[weights, updates, update_ratios, gradients, activations])
+        from batch_generators import study_summary_generator
+        gen_args = {'X_study': self.vecs['abstracts'][train_idxs],
+                    'X_summary': self.vecs['outcomes'][train_idxs],
+                    'nb_sample': batch_size,
+                    'cdnos': cdnos,
+                    'top_cdnos': top_cdnos
+        }
+        study_summary_batch = study_summary_generator(**gen_args)
+        [X_source, X_target], y_train = next(study_summary_batch)
+        y_train = to_categorical(y_train)
+        tl = TensorLogger([X_source, X_target], y_train, tensor_funcs=[weights])
         sl = StudyLogger(self.vecs['abstracts'][train_idxs],
                          self.vecs['outcomes'][train_idxs],
                          self.exp_group, self.exp_id)
 
         # filter down callbacks
-        cb_shorthands, cbs = ['cb', 'ce', 'ss', 'fl', 'es', 'sl', 'cv'], [cb, ce, ss, fl, es, sl, cv]
+        cb_shorthands, cbs = ['cb', 'ce', 'ss', 'fl', 'es', 'sl', 'tl', 'cv'], [cb, ce, ss, fl, es, sl, tl, cv]
         self.callbacks = [cb for cb_shorthand, cb in zip(cb_shorthands, cbs) if cb_shorthand in callback_set]
 
         if fit_generator:
-            # create batch generator
-            from batch_generators import study_summary_generator
-            gen_study_summary_batches = \
-                    study_summary_generator(X_study=self.vecs['abstracts'][train_idxs],
-                                            X_summary=self.vecs['outcomes'][train_idxs],
-                                            nb_sample=batch_size,
-                                            cdnos=cdnos,
-                                            top_cdnos=top_cdnos)
+            gen_study_summary_batches = study_summary_generator(**gen_args) # create batch generator
 
             self.model.fit_generator(gen_study_summary_batches,
                                      samples_per_epoch=batch_size, # small frequent epochs

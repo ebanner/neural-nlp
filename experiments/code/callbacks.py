@@ -61,11 +61,12 @@ class StudySimilarityLogger(Callback):
 
         self.X_study, self.X_summary = X_study, X_summary
         self.phase = phase
+        self.nb_sample = nb_sample
 
         from batch_generators import pair_generator
         study_study_pairs = pair_generator(nb_train=len(X_study),
                                            cdnos=cdnos,
-                                           top_cdnos=top_cdnos),
+                                           top_cdnos=top_cdnos,
                                            nb_sample=1000,
                                            exact_only=False)
 
@@ -138,11 +139,10 @@ class TensorLogger(Callback):
         hurt to include them for those that do.
         
         """
+        self.names, self.tensors = [], []
         for tensor_func in self.tensor_funcs:
             names, tensors = tensor_func(self.model)
             self.names, self.tensors = self.names+names, self.tensors+tensors
-            for name in names:
-                self.values[name] = []
 
         inputs = self.model.inputs
         labels, sample_weights = self.model.targets[0], self.model.sample_weights[0] # needed to compute gradient/update tensors
@@ -156,13 +156,12 @@ class TensorLogger(Callback):
         compute this tensors. The subset differs each epoch.
         
         """
-        tensor_vals = self.eval_tensors([self.X_train,
-                                         self.y_train,
-                                         np.ones(self.batch_size), # each sample has the same weight
-                                         self.phase])
+        tensor_vals = self.eval_tensors(self.X_train + [self.y_train,
+                                                        np.ones(self.batch_size), # each sample has the same weight
+                                                        self.phase])
 
         for tensor_val, name in zip(tensor_vals, self.names):
-            self.values[name] += [float(tensor_val)]
+            logs[name] = tensor_val
 
 class CSVLogger(Callback):
     """Callback for dumping csv data during training"""
