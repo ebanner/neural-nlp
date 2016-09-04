@@ -2,27 +2,44 @@
 
 import keras.backend as K
 
-from support import trainable_weights, norm
+from support import get_trainable_weights, norm
+
+
+FULL = False # set to true to return full instances of tensors
 
 
 def updates(model):
-    """Compute update magnitudes for every learnable tensor in the model"""
+    """Compute update magnitudes for every learnable tensor in the model
+    
+    Parameters
+    ----------
+    model : keras model instance
 
-    names, tensors = trainable_weights(model)
+    """
+    names, tensors = get_trainable_weights(model)
 
     # ignore updates for optimizer-specific tensors
     optimizer = model.optimizer
-    update_tups = [(p, p_new) for p, p_new in optimizer.updates if p.name in names]
-    update_mags = [norm(new - old) for new, old in update_tups]
+    tensor_pairs = [(p, p_new) for p, p_new in optimizer.updates if p.name in names]
+    tensors = [new - old for new, old in tensor_pairs]
+    if not FULL:
+        tensors = [norm(update_tensor) for update_tensor in tensors]
 
-    return [name+'_up' for name in names], update_mags
+    return [name+'_up' for name in names], tensors
 
 def weights(model):
-    """Compute weight magnitude for each parameter in the model"""
+    """Compute weight magnitude for each parameter in the model
+    
+    Parameters
+    ----------
+    model : keras model instance
+    
+    """
+    names, tensors = get_trainable_weights(model)
+    if not FULL:
+        tensors = [norm(tensor) for tensor in tensors]
 
-    names, tensors = trainable_weights(model)
-
-    return [name+'_mag' for name in names], [norm(tensor) for tensor in tensors]
+    return [name+'_mag' for name in names], tensors
 
 def update_ratios(model):
     """Compute update ratio tensors for every learnable parameter in the model
@@ -36,44 +53,40 @@ def update_ratios(model):
     names, weight_mags = weights(model)
     names, update_mags = updates(model)
 
-    return [name[:-3]+'_ratio' for name in names], [up/mag for mag, up in zip(weight_mags, update_mags)]
+    return [name[:-3]+'_ratio' for name in names], [norm(up)/norm(mag) for mag, up in zip(weight_mags, update_mags)]
 
 def gradients(model):
     """Compute tensors magnitudes which correspond to the gradients for each
     learnable parameter
 
+    Parameters
+    ----------
+    model : keras model instance
+
     Use gradients reported by the optimizer in the event gradient clipping is
     used.
 
     """
-    names, tensors = trainable_weights(model)
+    names, tensors = get_trainable_weights(model)
 
     optimizer = model.optimizer
-    grad_tensors = optimizer.get_gradients(model.total_loss, tensors)
-    grad_mags = [norm(grad_tensor) for grad_tensor in grad_tensors]
+    tensors = optimizer.get_gradients(model.total_loss, tensors)
+    if not FULL:
+        tensors = [norm(grad_tensor) for grad_tensor in tensors]
 
-    return [name+'_grad' for name in names], grad_mags
+    return [name+'_grad' for name in names], tensors
 
-def activations(model, filters=['activation', 'dropout']):
-    """Compute activation statistics (mean and stddev) for specified layers
+def activations(model, layer_names=['study', 'summary', 'raw_score', 'sigmoid_score']):
+    """Compute means and standard deviations of `layer_names`
 
     Parameters
     ----------
     model : keras model
-    filters : string that specifies which layers to monitor
+    layer_names : name of layers to compute statistics for
 
     """
-    tensors = [layer for layer in model.layers if any(layer.name.startswith(filter) for filter in filters)]
-    names = [tensor.name for tensor in tensors]
+    tensors = [model.get_layer(layer_name).output for layer_name in layer_names]
+    if not FULL:
+        tensors = [norm(tensor) for tensor in tensors]
 
-    mean_tensors, std_tensors = [0]*len(tensors), [0]*len(tensors)
-    for i, tensor in enumerate(tensors):
-        means = K.mean(K.equal(tensor.output, 0), axis=1)
-
-        mean_tensors[i] = K.mean(means)
-        std_tensors[i] = K.std(means)
-
-    names = [name+'_mu' for name in names] + [name+'_std' for name in names]
-    tensors = mean_tensors + std_tensors
-
-    return names, tensors
+    return layer_names, tensors

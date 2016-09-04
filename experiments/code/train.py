@@ -43,14 +43,15 @@ from trainers import CNNSiameseTrainer
         loss=('type of loss to use', 'option', None, str),
         top_k=('the number of reviews with the most studies to use for training data', 'option', None, int),
         nb_sample=('number of reviews sample for computing study similarity', 'option', None, int),
+        log_full=('log full tensors with TensorLogger if True and magnitudes otherwise', 'option', None, str),
 )
 def main(exp_group='', exp_id='', nb_epoch=5, nb_filter=1000, filter_lens='1,2,3', 
         nb_hidden=1, hidden_dim=1024, dropout_prob=.5, dropout_emb='True', reg=0,
         backprop_emb='False', batch_size=128, word2vec_init='False', nb_train=1000000,
-        nb_val=1000000, n_folds=5, optimizer='adam', lr=.001,
-        do_cv='False', metric='None', callbacks='cb,ce,fl,cv,es',
-        trainer='CNNSiameseTrainer', features='', inputs='abstracts,outcomes', labels='None',
-        fit_generator='True', loss='binary_crossentropy', top_k=2, nb_sample=1000):
+        nb_val=1000000, n_folds=5, optimizer='adam', lr=.001, do_cv='False',
+        metric='None', callbacks='cb,ce,fl,cv,es', trainer='CNNSiameseTrainer',
+        features='', inputs='abstracts,outcomes', labels='None', fit_generator='True',
+        loss='binary_crossentropy', top_k=2, nb_sample=1000, log_full='False'):
     """Training process
 
     1. Parse command line arguments
@@ -89,7 +90,6 @@ def main(exp_group='', exp_id='', nb_epoch=5, nb_filter=1000, filter_lens='1,2,3
     trainer.build_model(nb_filter, filter_lens, nb_hidden, hidden_dim, dropout_prob,
             dropout_emb, backprop_emb, word2vec_init, reg)
     trainer.compile_model(metric, optimizer, lr, loss)
-    trainer.save_architecture()
 
     # get study indices to train on based on k most popular reviews
     df = pd.read_csv('../data/extra/pico_cdsr.csv', index_col=0)
@@ -101,7 +101,8 @@ def main(exp_group='', exp_id='', nb_epoch=5, nb_filter=1000, filter_lens='1,2,3
     # train
     fold_idx = 0 # legacy
     history = trainer.train(train_idxs, train_idxs, nb_epoch, batch_size, nb_train,
-            nb_val, callbacks, fold_idx, metric, fit_generator, top_cdnos, cdnos, nb_sample)
+            nb_val, callbacks, fold_idx, metric, fit_generator, top_cdnos, cdnos, nb_sample,
+            log_full)
 
 
 if __name__ == '__main__':

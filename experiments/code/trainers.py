@@ -46,6 +46,7 @@ class CNNSiameseTrainer(Trainer):
                                       input_dim=self.vecs['outcomes'].vocab_size,
                                       input_length=self.vecs['outcomes'].maxlen,
                                       W_regularizer=l2(reg))(summary)
+
         summary_vec = cnn_embed(embedded_summary,
                                 filter_lens,
                                 nb_filter,
@@ -56,8 +57,9 @@ class CNNSiameseTrainer(Trainer):
         # dot vectors and send through sigmoid
         score = merge(inputs=[abstract_vec, summary_vec],
                       mode='dot',
-                      dot_axes=1) # won't work without `dot_axes=1` (!!)
+                      dot_axes=1, # won't work without `dot_axes=1` (!!)
+                      name='raw_score')
 
-        prob = Activation('sigmoid')(score)
+        prob = Activation('sigmoid', name='sigmoid_score')(score)
 
         self.model = Model(input=[abstract, summary], output=prob)

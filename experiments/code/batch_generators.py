@@ -1,4 +1,5 @@
 import numpy as np
+import pandas as pd
 
 
 def pair_generator(nb_train, cdnos, top_cdnos, nb_sample=128, phase=0, exact_only=False):
@@ -56,7 +57,8 @@ def pair_generator(nb_train, cdnos, top_cdnos, nb_sample=128, phase=0, exact_onl
 
         yield study_idxs, target_idxs
 
-def study_summary_generator(X_study, X_summary, cdnos, top_cdnos, nb_sample=128, phase=0, exact_only=False):
+def study_summary_generator(X_study, X_summary, cdnos, top_cdnos, exp_group,
+        exp_id, batch_size=128, phase=0, exact_only=False):
     """Wrapper generator around pair_generator() for yielding batches of
     ([study, summary], y) pairs.
 
@@ -64,11 +66,22 @@ def study_summary_generator(X_study, X_summary, cdnos, top_cdnos, nb_sample=128,
     and second half are of the form ([study, summary-from-different-review], y).
 
     """
-    y = np.zeros(nb_sample, dtype=np.int)
-    y[:nb_sample/2] = 1 # first half of samples are good always
+    y = np.zeros(batch_size, dtype=np.int)
+    y[:batch_size/2] = 1 # first half of samples are good always
 
-    study_summary_batch = pair_generator(nb_train=len(X_study), cdnos=cdnos, top_cdnos=top_cdnos, exact_only=True)
+    study_summary_batch = pair_generator(nb_train=len(X_study),
+                                         cdnos=cdnos,
+                                         top_cdnos=top_cdnos,
+                                         nb_sample=batch_size,
+                                         exact_only=True)
+    epoch = 0
     while True:
         study_idxs, summary_idxs = next(study_summary_batch)
+        df = pd.DataFrame({'epoch': [epoch]*2, 'study_idx': study_idxs, 'summary_idxs': summary_idxs})
+        df.to_csv('../store/batch_idxs/{}/{}.csv'.format(exp_group, exp_id), 
+                  index=False,
+                  mode='a' if epoch > 0 else 'w',
+                  header=epoch==0)
 
         yield [X_study[study_idxs], X_summary[summary_idxs]], y
+        epoch += 1

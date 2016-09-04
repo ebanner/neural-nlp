@@ -84,7 +84,7 @@ def average(inputs):
         accum += input
     return accum / float(len(inputs))
 
-def trainable_weights(model):
+def get_trainable_weights(model):
     """Find all layers which are trainable in the model
 
     Surprisingly `model.trainable_weights` will return layers for which
@@ -150,4 +150,4 @@ def cnn_embed(words, filter_lens, nb_filter, max_doclen, reg, name):
 
         activations[i] = flattened
 
-    return merge(activations, mode='concat', name='{}_vec'.format(name)) if len(filter_lens) > 1 else flattened
+    return merge(activations, mode='concat', name=name) if len(filter_lens) > 1 else flattened

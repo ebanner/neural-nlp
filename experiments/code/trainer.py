@@ -13,13 +13,15 @@ import keras
 from keras.models import Model
 from keras.utils.np_utils import to_categorical
 from keras.callbacks import ModelCheckpoint, EarlyStopping
-from keras.optimizers import Adam, SGD
+from keras.optimizers import Adam, SGD, Adadelta
 from keras.models import model_from_json
 
 from support import per_class_f1s, per_class_accs, stratified_batch_generator
 from loggers import weights, updates, update_ratios, gradients, activations
+import loggers
 
-from callbacks import Flusher, TensorLogger, CSVLogger, ProbaLogger, StudyLogger, StudySimilarityLogger
+from callbacks import Flusher, TensorLogger, CSVLogger, StudyLogger
+from callbacks import StudySimilarityLogger, EarlyNaNStopping, CheckpointModel
 
 
 class Trainer:
@@ -109,7 +111,8 @@ class Trainer:
 
         """
         optimizers = {'adam': Adam,
-                      'sgd' : SGD
+                      'sgd' : SGD,
+                      'adadelta': Adadelta,
         }
         self.optimizer = optimizers[optimizer](**{'lr': lr})
 
@@ -132,7 +135,8 @@ class Trainer:
         open(model_loc, 'w').write(json_string)
 
     def train(self, train_idxs, val_idxs, nb_epoch, batch_size, nb_train, nb_val,
-            callback_set, fold, metric, fit_generator, top_cdnos, cdnos, nb_sample):
+            callback_list, fold, metric, fit_generator, top_cdnos, cdnos, nb_sample,
+            log_full):
         """Set up callbacks and start training"""
 
         # train and validation sets
@@ -140,8 +144,23 @@ class Trainer:
         nb_train, nb_val = len(train_idxs), len(val_idxs)
         X_train, X_val = [X[train_idxs] for X in self.vecs.values()], [X[val_idxs] for X in self.vecs.values()]
 
+        # get a batch of training data as some callbacks require it
+        from batch_generators import study_summary_generator
+        gen_args = {'X_study': self.vecs['abstracts'][train_idxs],
+                    'X_summary': self.vecs['outcomes'][train_idxs],
+                    'batch_size': batch_size,
+                    'cdnos': cdnos,
+                    'top_cdnos': top_cdnos,
+                    'exp_group': self.exp_group,
+                    'exp_id': self.exp_id,
+        }
+        study_summary_batch = study_summary_generator(**gen_args)
+        [X_source, X_target], y_train = next(study_summary_batch)
+        y_train = to_categorical(y_train, nb_classes=2)
+        loggers.FULL = log_full # whether to log full tensors
+        weight_str = '../store/weights/{}/{}/{}-{}.h5' # where to save model weights
+
         # define callbacks
-        weight_str = '../store/weights/{}/{}/{}-{}.h5'
         cb = ModelCheckpoint(weight_str.format(self.exp_group, self.exp_id, fold, metric),
                              monitor='loss',
                              save_best_only=True,
@@ -155,26 +174,29 @@ class Trainer:
         es = EarlyStopping(monitor='val_acc', patience=10, verbose=2, mode='max')
         fl = Flusher()
         cv = CSVLogger(self.exp_group, self.exp_id, self.hyperparam_dict, fold)
-        # pl = ProbaLogger(self.exp_group, self.exp_id, X_val, self.nb_train, self.nb_class, batch_size, metric)
-        from batch_generators import study_summary_generator
-        gen_args = {'X_study': self.vecs['abstracts'][train_idxs],
-                    'X_summary': self.vecs['outcomes'][train_idxs],
-                    'nb_sample': batch_size,
-                    'cdnos': cdnos,
-                    'top_cdnos': top_cdnos
-        }
-        study_summary_batch = study_summary_generator(**gen_args)
-        [X_source, X_target], y_train = next(study_summary_batch)
-        y_train = to_categorical(y_train)
-        tl = TensorLogger([X_source, X_target], y_train, tensor_funcs=[weights])
+        tl = TensorLogger([X_source, X_target], y_train, self.exp_group, self.exp_id,
+                          tensor_funcs=[activations, weights, updates, update_ratios, gradients])
         sl = StudyLogger(self.vecs['abstracts'][train_idxs],
                          self.vecs['outcomes'][train_idxs],
                          self.exp_group, self.exp_id)
+        ns = EarlyNaNStopping(self.exp_group, self.exp_id)
+        cm = CheckpointModel(self.exp_group, self.exp_id)
 
         # filter down callbacks
-        cb_shorthands, cbs = ['cb', 'ce', 'ss', 'fl', 'es', 'sl', 'tl', 'cv'], [cb, ce, ss, fl, es, sl, tl, cv]
-        self.callbacks = [cb for cb_shorthand, cb in zip(cb_shorthands, cbs) if cb_shorthand in callback_set]
+        callback_dict = {'cb': cb, # checkpoint best
+                         'ce': ce, # checkpoint every
+                         'tl': tl, # tensor logger
+                         'ns': ns, # early NaN stopping
+                         'fl': fl, # flusher
+                         'es': es, # early stopping
+                         'sl': sl, # study logger
+                         'ss': ss, # study similarity logger
+                         'cv': cv, # should go *last* as other callbacks populate `logs` dict
+                         'cm': cm, # checkpoint model
+        }
+        self.callbacks = [callback_dict[cb_name] for cb_name in callback_list]
 
+        # start training
         if fit_generator:
             gen_study_summary_batches = study_summary_generator(**gen_args) # create batch generator
 
