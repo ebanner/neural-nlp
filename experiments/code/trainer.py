@@ -20,8 +20,7 @@ from support import per_class_f1s, per_class_accs, stratified_batch_generator
 from loggers import weights, updates, update_ratios, gradients, activations
 import loggers
 
-from callbacks import Flusher, TensorLogger, CSVLogger, StudyLogger
-from callbacks import StudySimilarityLogger, EarlyNaNStopping, CheckpointModel
+from callbacks import Flusher, TensorLogger, CSVLogger, StudyLogger, StudySimilarityLogger
 
 
 class Trainer:
@@ -177,20 +176,16 @@ class Trainer:
         sl = StudyLogger(self.vecs['abstracts'][train_idxs],
                          self.vecs['outcomes'][train_idxs],
                          self.exp_group, self.exp_id)
-        ns = EarlyNaNStopping(self.exp_group, self.exp_id)
-        cm = CheckpointModel(self.exp_group, self.exp_id)
 
         # filter down callbacks
         callback_dict = {'cb': cb, # checkpoint best
                          'ce': ce, # checkpoint every
                          'tl': tl, # tensor logger
-                         'ns': ns, # early NaN stopping
                          'fl': fl, # flusher
                          'es': es, # early stopping
                          'sl': sl, # study logger
                          'ss': ss, # study similarity logger
                          'cv': cv, # should go *last* as other callbacks populate `logs` dict
-                         'cm': cm, # checkpoint model
         }
         self.callbacks = [callback_dict[cb_name] for cb_name in callback_list]
 
