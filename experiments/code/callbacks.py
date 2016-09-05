@@ -104,13 +104,13 @@ class StudySimilarityLogger(Callback):
 class TensorLogger(Callback):
     """Callback for monitoring value of tensors during training"""
 
-    def __init__(self, X_train, y_train, exp_group, exp_id, tensor_funcs, phase=1):
+    def __init__(self, X, y, exp_group, exp_id, tensor_funcs, phase=1):
         """Save variables
 
         Parameters
         ----------
-        X_train : training data
-        y_train : training labels
+        X : training data
+        y : training labels
         tensor_funcs : list of functions which take a keras model and produce tensors as well as their names
         exp_group : experiment group
         exp_id : experiment id
@@ -127,16 +127,15 @@ class TensorLogger(Callback):
         super(Callback, self).__init__()
 
         self.phase = phase
-        self.X_train, self.y_train = X_train, y_train
+        self.X, self.y = X, y
         self.tensor_funcs = tensor_funcs
         self.exp_group = exp_group
         self.exp_id = exp_id
 
-        self.nb_sample = len(X_train[0])
-        assert len(X_train[1]) == self.nb_sample
+        self.nb_sample = len(X[0])
+        assert len(X[1]) == self.nb_sample
 
         self.tensors, self.names = [], []
-        self.values = {} # logging dict
 
     def on_train_begin(self, logs={}):
         """Build keras function to evaluate all tensors in one call
@@ -150,6 +149,7 @@ class TensorLogger(Callback):
             names, tensors = tensor_func(self.model)
             self.names, self.tensors = self.names+names, self.tensors+tensors
 
+        # append suffix to enableidentification in `logs` by other callbacks
         self.names = [name+'_tensor' for name in self.names]
 
         inputs = self.model.inputs
@@ -164,12 +164,32 @@ class TensorLogger(Callback):
         compute this tensors. The subset differs each epoch.
         
         """
-        tensor_vals = self.eval_tensors(self.X_train + [self.y_train,
-                                                        np.ones(self.nb_sample), # each sample has the same weight
-                                                        self.phase])
+        tensor_vals = self.eval_tensors(self.X + [self.y,
+                                                  np.ones(self.nb_sample), # each sample has the same weight
+                                                  self.phase])
 
         for tensor_val, name in zip(tensor_vals, self.names):
-            logs[name] = tensor_val if loggers.FULL else float(tensor_val)
+            nb_nan = np.isnan(tensor_val).sum()
+            if nb_nan == 0:
+                continue
+
+            print '{} has {} NaNs!'.format(name, nb_nan)
+            self.model.stop_training = True # end training prematurely
+
+        if not self.model.stop_training:
+            return
+
+        # dump all tensor vals
+        data_fname = '../store/nan-snapshot/{}/{}/{}.p'
+        for tensor_val, name in zip(tensor_vals, self.names):
+            pickle.dump(np.array(tensor_val), open(data_fname.format(self.exp_group, self.exp_id, name), 'wb'))
+
+        # dump model
+        self.model.save('../store/nan-snapshot/{}/{}/{}.h5'.format(self.exp_group, self.exp_id, 'model'))
+
+        # dump batch
+        pickle.dump(self.X, open(data_fname.format(self.exp_group, self.exp_id, 'X'), 'wb'))
+        pickle.dump(self.y, open(data_fname.format(self.exp_group, self.exp_id, 'y'), 'wb'))
 
 class CSVLogger(Callback):
     """Callback for dumping csv data during training"""
@@ -297,11 +317,12 @@ class EarlyNaNStopping(Callback):
                 continue
 
             if np.isnan(tensor).sum() > 0:
+                print '{} has a NaN!'.format(key)
                 # self._dump_tensors(self.previous_logs, suffix='old')
                 # self._dump_tensors(logs, suffix='new')
                 # self.model.save('../store/weights/{}/{}/{}-nan.h5'.format(self.exp_group, self.exp_id, epoch)) # dump model
                 self.model.stop_training = True # end training prematurely
-                break # found a nan
+                # break # found a nan
 
         # delete tensor keys no matter what so CSVLogger doesn't log them
         tensor_keys = [key for key in logs if key.endswith('_tensor')]

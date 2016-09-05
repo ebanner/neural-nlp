@@ -114,12 +114,12 @@ class Trainer:
                       'sgd' : SGD,
                       'adadelta': Adadelta,
         }
-        self.optimizer = optimizers[optimizer](**{'lr': lr})
+        self.optimizer = optimizers[optimizer](**{'lr': lr, 'clipvalue': 0.5}) # try and clip gradient norm
 
         # define metrics
         self.model.compile(self.optimizer,
                            loss=loss,
-                           metrics=per_class_accs(self.y_train) if metric else [])
+                           metrics=per_class_accs(self.y_train) if metric == 'acc' else [])
 
         self.model.summary()
 
@@ -154,9 +154,7 @@ class Trainer:
                     'exp_group': self.exp_group,
                     'exp_id': self.exp_id,
         }
-        study_summary_batch = study_summary_generator(**gen_args)
-        [X_source, X_target], y_train = next(study_summary_batch)
-        y_train = to_categorical(y_train, nb_classes=2)
+        [X_source, X_target], y = next(study_summary_generator(**gen_args))
         loggers.FULL = log_full # whether to log full tensors
         weight_str = '../store/weights/{}/{}/{}-{}.h5' # where to save model weights
 
@@ -174,7 +172,7 @@ class Trainer:
         es = EarlyStopping(monitor='val_acc', patience=10, verbose=2, mode='max')
         fl = Flusher()
         cv = CSVLogger(self.exp_group, self.exp_id, self.hyperparam_dict, fold)
-        tl = TensorLogger([X_source, X_target], y_train, self.exp_group, self.exp_id,
+        tl = TensorLogger([X_source, X_target], y, self.exp_group, self.exp_id,
                           tensor_funcs=[activations, weights, updates, update_ratios, gradients])
         sl = StudyLogger(self.vecs['abstracts'][train_idxs],
                          self.vecs['outcomes'][train_idxs],

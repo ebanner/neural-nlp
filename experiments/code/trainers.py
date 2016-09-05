@@ -43,9 +43,9 @@ class CNNSiameseTrainer(Trainer):
         # summary vec
         summary = Input(shape=[self.vecs['outcomes'].maxlen], dtype='int32')
         embedded_summary = Embedding(output_dim=self.vecs['outcomes'].word_dim,
-                                      input_dim=self.vecs['outcomes'].vocab_size,
-                                      input_length=self.vecs['outcomes'].maxlen,
-                                      W_regularizer=l2(reg))(summary)
+                                     input_dim=self.vecs['outcomes'].vocab_size,
+                                     input_length=self.vecs['outcomes'].maxlen,
+                                     W_regularizer=l2(reg))(summary)
 
         summary_vec = cnn_embed(embedded_summary,
                                 filter_lens,
@@ -60,6 +60,6 @@ class CNNSiameseTrainer(Trainer):
                       dot_axes=1, # won't work without `dot_axes=1` (!!)
                       name='raw_score')
 
-        prob = Activation('sigmoid', name='sigmoid_score')(score)
+        # prob = Activation('sigmoid', name='sigmoid_score')(score)
 
-        self.model = Model(input=[abstract, summary], output=prob)
+        self.model = Model(input=[abstract, summary], output=score)
