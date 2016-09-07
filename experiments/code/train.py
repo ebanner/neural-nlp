@@ -49,9 +49,9 @@ def main(exp_group='', exp_id='', nb_epoch=5, nb_filter=1000, filter_lens='1,2,3
         nb_hidden=1, hidden_dim=1024, dropout_prob=.5, dropout_emb='True', reg=0,
         backprop_emb='False', batch_size=128, word2vec_init='False', nb_train=1000000,
         nb_val=1000000, n_folds=5, optimizer='adam', lr=.001, do_cv='False',
-        metric='None', callbacks='cb,ce,fl,cv,es', trainer='CNNSiameseTrainer',
+        metric='loss', callbacks='cb,ce,fl,cv,es', trainer='CNNSiameseTrainer',
         features='', inputs='abstracts,outcomes', labels='None', fit_generator='True',
-        loss='binary_crossentropy', top_k=2, nb_sample=1000, log_full='False'):
+        loss='hinge', top_k=2, nb_sample=1000, log_full='False'):
     """Training process
 
     1. Parse command line arguments

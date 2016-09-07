@@ -20,8 +20,7 @@ from support import per_class_f1s, per_class_accs, stratified_batch_generator
 from loggers import weights, updates, update_ratios, gradients, activations
 import loggers
 
-from callbacks import Flusher, TensorLogger, CSVLogger, StudyLogger
-from callbacks import StudySimilarityLogger, EarlyNaNStopping, CheckpointModel
+from callbacks import Flusher, TensorLogger, CSVLogger, StudyLogger, StudySimilarityLogger
 
 
 class Trainer:
@@ -114,12 +113,12 @@ class Trainer:
                       'sgd' : SGD,
                       'adadelta': Adadelta,
         }
-        self.optimizer = optimizers[optimizer](**{'lr': lr})
+        self.optimizer = optimizers[optimizer](**{'lr': lr, 'clipvalue': 0.5}) # try and clip gradient norm
 
         # define metrics
         self.model.compile(self.optimizer,
                            loss=loss,
-                           metrics=per_class_accs(self.y_train) if metric else [])
+                           metrics=per_class_accs(self.y_train) if metric == 'acc' else [])
 
         self.model.summary()
 
@@ -154,9 +153,7 @@ class Trainer:
                     'exp_group': self.exp_group,
                     'exp_id': self.exp_id,
         }
-        study_summary_batch = study_summary_generator(**gen_args)
-        [X_source, X_target], y_train = next(study_summary_batch)
-        y_train = to_categorical(y_train, nb_classes=2)
+        [X_source, X_target], y = next(study_summary_generator(**gen_args))
         loggers.FULL = log_full # whether to log full tensors
         weight_str = '../store/weights/{}/{}/{}-{}.h5' # where to save model weights
 
@@ -174,25 +171,21 @@ class Trainer:
         es = EarlyStopping(monitor='val_acc', patience=10, verbose=2, mode='max')
         fl = Flusher()
         cv = CSVLogger(self.exp_group, self.exp_id, self.hyperparam_dict, fold)
-        tl = TensorLogger([X_source, X_target], y_train, self.exp_group, self.exp_id,
+        tl = TensorLogger([X_source, X_target], y, self.exp_group, self.exp_id,
                           tensor_funcs=[activations, weights, updates, update_ratios, gradients])
         sl = StudyLogger(self.vecs['abstracts'][train_idxs],
                          self.vecs['outcomes'][train_idxs],
                          self.exp_group, self.exp_id)
-        ns = EarlyNaNStopping(self.exp_group, self.exp_id)
-        cm = CheckpointModel(self.exp_group, self.exp_id)
 
         # filter down callbacks
         callback_dict = {'cb': cb, # checkpoint best
                          'ce': ce, # checkpoint every
                          'tl': tl, # tensor logger
-                         'ns': ns, # early NaN stopping
                          'fl': fl, # flusher
                          'es': es, # early stopping
                          'sl': sl, # study logger
                          'ss': ss, # study similarity logger
                          'cv': cv, # should go *last* as other callbacks populate `logs` dict
-                         'cm': cm, # checkpoint model
         }
         self.callbacks = [callback_dict[cb_name] for cb_name in callback_list]
 

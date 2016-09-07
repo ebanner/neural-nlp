@@ -66,8 +66,8 @@ def study_summary_generator(X_study, X_summary, cdnos, top_cdnos, exp_group,
     and second half are of the form ([study, summary-from-different-review], y).
 
     """
-    y = np.zeros(batch_size, dtype=np.int)
-    y[:batch_size/2] = 1 # first half of samples are good always
+    y = np.full(shape=[batch_size, 1], fill_value=-1, dtype=np.int)
+    y[:batch_size/2, 0] = 1 # first half of samples are good always
 
     study_summary_batch = pair_generator(nb_train=len(X_study),
                                          cdnos=cdnos,
@@ -77,7 +77,7 @@ def study_summary_generator(X_study, X_summary, cdnos, top_cdnos, exp_group,
     epoch = 0
     while True:
         study_idxs, summary_idxs = next(study_summary_batch)
-        df = pd.DataFrame({'epoch': [epoch]*2, 'study_idx': study_idxs, 'summary_idxs': summary_idxs})
+        df = pd.DataFrame({'epoch': [epoch]*batch_size, 'study_idx': study_idxs, 'summary_idxs': summary_idxs})
         df.to_csv('../store/batch_idxs/{}/{}.csv'.format(exp_group, exp_id), 
                   index=False,
                   mode='a' if epoch > 0 else 'w',

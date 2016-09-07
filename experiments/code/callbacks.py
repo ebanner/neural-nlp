@@ -104,13 +104,13 @@ class StudySimilarityLogger(Callback):
 class TensorLogger(Callback):
     """Callback for monitoring value of tensors during training"""
 
-    def __init__(self, X_train, y_train, exp_group, exp_id, tensor_funcs, phase=1):
+    def __init__(self, X, y, exp_group, exp_id, tensor_funcs, phase=1):
         """Save variables
 
         Parameters
         ----------
-        X_train : training data
-        y_train : training labels
+        X : training data
+        y : training labels
         tensor_funcs : list of functions which take a keras model and produce tensors as well as their names
         exp_group : experiment group
         exp_id : experiment id
@@ -127,16 +127,15 @@ class TensorLogger(Callback):
         super(Callback, self).__init__()
 
         self.phase = phase
-        self.X_train, self.y_train = X_train, y_train
+        self.X, self.y = X, y
         self.tensor_funcs = tensor_funcs
         self.exp_group = exp_group
         self.exp_id = exp_id
 
-        self.nb_sample = len(X_train[0])
-        assert len(X_train[1]) == self.nb_sample
+        self.nb_sample = len(X[0])
+        assert len(X[1]) == self.nb_sample
 
         self.tensors, self.names = [], []
-        self.values = {} # logging dict
 
     def on_train_begin(self, logs={}):
         """Build keras function to evaluate all tensors in one call
@@ -150,6 +149,7 @@ class TensorLogger(Callback):
             names, tensors = tensor_func(self.model)
             self.names, self.tensors = self.names+names, self.tensors+tensors
 
+        # append suffix to enableidentification in `logs` by other callbacks
         self.names = [name+'_tensor' for name in self.names]
 
         inputs = self.model.inputs
@@ -164,12 +164,32 @@ class TensorLogger(Callback):
         compute this tensors. The subset differs each epoch.
         
         """
-        tensor_vals = self.eval_tensors(self.X_train + [self.y_train,
-                                                        np.ones(self.nb_sample), # each sample has the same weight
-                                                        self.phase])
+        tensor_vals = self.eval_tensors(self.X + [self.y,
+                                                  np.ones(self.nb_sample), # each sample has the same weight
+                                                  self.phase])
 
         for tensor_val, name in zip(tensor_vals, self.names):
-            logs[name] = tensor_val if loggers.FULL else float(tensor_val)
+            nb_nan = np.isnan(tensor_val).sum()
+            if nb_nan == 0:
+                continue
+
+            print '{} has {} NaNs!'.format(name, nb_nan)
+            self.model.stop_training = True # end training prematurely
+
+        if not self.model.stop_training:
+            return
+
+        # dump all tensor vals
+        data_fname = '../store/nan-snapshot/{}/{}/{}.p'
+        for tensor_val, name in zip(tensor_vals, self.names):
+            pickle.dump(np.array(tensor_val), open(data_fname.format(self.exp_group, self.exp_id, name), 'wb'))
+
+        # dump model
+        self.model.save('../store/nan-snapshot/{}/{}/{}.h5'.format(self.exp_group, self.exp_id, 'model'))
+
+        # dump batch
+        pickle.dump(self.X, open(data_fname.format(self.exp_group, self.exp_id, 'X'), 'wb'))
+        pickle.dump(self.y, open(data_fname.format(self.exp_group, self.exp_id, 'y'), 'wb'))
 
 class CSVLogger(Callback):
     """Callback for dumping csv data during training"""
@@ -278,69 +298,3 @@ class StudyLogger(Callback):
         TEST_MODE = 0 # learning phase of 0 for test mode (i.e. do *not* apply dropout)
         abstract_vecs = self.embed_abstracts([self.X_abstract, self.X_summary, TEST_MODE])
         pickle.dump(abstract_vecs[0], open(self.dump_loc, 'w'))
-
-class EarlyNaNStopping(Callback):
-    """Callback for debugging NaN bug
-    
-    If NaN loss, then log final model and stop training.
-    
-    """
-    def __init__(self, exp_group, exp_id):
-        super(Callback, self).__init__()
-        self.exp_group, self.exp_id = exp_group, exp_id
-
-    def on_epoch_end(self, epoch, logs={}):
-        """Signal the end of training at the first sign of NaNs"""
-
-        for key, tensor in logs.items():
-            if not key.endswith('_tensor'):
-                continue
-
-            if np.isnan(tensor).sum() > 0:
-                # self._dump_tensors(self.previous_logs, suffix='old')
-                # self._dump_tensors(logs, suffix='new')
-                # self.model.save('../store/weights/{}/{}/{}-nan.h5'.format(self.exp_group, self.exp_id, epoch)) # dump model
-                self.model.stop_training = True # end training prematurely
-                break # found a nan
-
-        # delete tensor keys no matter what so CSVLogger doesn't log them
-        tensor_keys = [key for key in logs if key.endswith('_tensor')]
-        for tensor_key in tensor_keys: # delete tensor references so they don't pile up
-            del logs[tensor_key]
-
-    def _dump_tensors(self, logs, suffix):
-        """Dump tensors to disk"""
-
-        for key, val in logs.items():
-            if not key.endswith('_tensor'):
-                continue
-
-            tensor_loc = '../store/tensors/{}/{}/{}-{}.p'.format(self.exp_group, self.exp_id, key, suffix)
-            pickle.dump(val, open(tensor_loc, 'w'))
-
-class CheckpointModel(Callback):
-    """Callback for saving model each epoch
-    
-    Keep last two models around.
-    
-    """
-    def __init__(self, exp_group, exp_id):
-        super(Callback, self).__init__()
-
-        self.exp_group, self.exp_id = exp_group, exp_id
-        self.model_fname = '../store/weights/{}/{}/{}.h5'
-
-    def on_train_begin(self, logs={}):
-        # bootstrap by saving first model
-        self.model.save(self.model_fname.format(self.exp_group, self.exp_id, 'new'))
-
-    def on_epoch_end(self, epoch, logs={}):
-        # rename old new model to old model
-        try:
-            os.rename(self.model_fname.format(self.exp_group, self.exp_id, 'new'),
-                      self.model_fname.format(self.exp_group, self.exp_id, 'old'))
-        except:
-            pass
-
-        # save new model
-        self.model.save(self.model_fname.format(self.exp_group, self.exp_id, 'new'))

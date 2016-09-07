@@ -76,7 +76,7 @@ def gradients(model):
 
     return [name+'_grad' for name in names], tensors
 
-def activations(model, layer_names=['study', 'summary', 'raw_score', 'sigmoid_score']):
+def activations(model, layer_names=['study', 'summary', 'raw_score']):
     """Compute means and standard deviations of `layer_names`
 
     Parameters
