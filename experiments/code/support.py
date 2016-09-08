@@ -151,3 +151,15 @@ def cnn_embed(words, filter_lens, nb_filter, max_doclen, reg, name):
         activations[i] = flattened
 
     return merge(activations, mode='concat', name=name) if len(filter_lens) > 1 else flattened
+
+def top_reviews(cdnos, k):
+    top_cdnos = set(cdnos.value_counts().sort_values(ascending=False)[:k])
+    top_idxs = cdnos.map(lambda cdno: cdno in top_cdnos).index
+
+    return np.array(top_idxs)
+
+    # get study indices to train on based on k most popular reviews
+    df = df[df.cdno.map(lambda cdno: cdno in top_cdnos)] # throw out studies we are not using
+    cdnos = df.reset_index(drop=True).cdno # get cdnos so we can map studies to their cdno
+    train_idxs, val_idxs = np.array((df.train == True).index), np.array((df.train == True).index)
+

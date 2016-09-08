@@ -27,8 +27,6 @@ from trainers import CNNSiameseTrainer
         backprop_emb=('whether to backprop into embeddings', 'option', None, str),
         batch_size=('batch size', 'option', None, int),
         word2vec_init=('initialize embeddings with word2vec', 'option', None, str),
-        nb_train=('number of examples to train on', 'option', None, int),
-        nb_val=('number of examples to validate on', 'option', None, int),
         n_folds=('number of folds for cross validation', 'option', None, int),
         optimizer=('optimizer to use during training', 'option', None, str),
         lr=('learning rate to use during training', 'option', None, float),
@@ -41,17 +39,17 @@ from trainers import CNNSiameseTrainer
         labels=('labels to use', 'option', None, str),
         fit_generator=('whether to use a fit generator', 'option', None, str),
         loss=('type of loss to use', 'option', None, str),
-        top_k=('the number of reviews with the most studies to use for training data', 'option', None, int),
+        nb_data=('the percentage of dataset to use', 'option', None, float),
         nb_sample=('number of reviews sample for computing study similarity', 'option', None, int),
         log_full=('log full tensors with TensorLogger if True and magnitudes otherwise', 'option', None, str),
 )
 def main(exp_group='', exp_id='', nb_epoch=5, nb_filter=1000, filter_lens='1,2,3', 
         nb_hidden=1, hidden_dim=1024, dropout_prob=.5, dropout_emb='True', reg=0,
-        backprop_emb='False', batch_size=128, word2vec_init='False', nb_train=1000000,
-        nb_val=1000000, n_folds=5, optimizer='adam', lr=.001, do_cv='False',
-        metric='loss', callbacks='cb,ce,fl,cv,es', trainer='CNNSiameseTrainer',
-        features='', inputs='abstracts,outcomes', labels='None', fit_generator='True',
-        loss='hinge', top_k=2, nb_sample=1000, log_full='False'):
+        backprop_emb='False', batch_size=128, word2vec_init='False',
+        n_folds=5, optimizer='adam', lr=.001, do_cv='False', metric='loss',
+        callbacks='cb,ce,fl,cv,es', trainer='CNNSiameseTrainer', features='',
+        inputs='abstracts,outcomes', labels='None', fit_generator='True',
+        loss='hinge', nb_data=2, nb_sample=1000, log_full='False'):
     """Training process
 
     1. Parse command line arguments
@@ -91,18 +89,27 @@ def main(exp_group='', exp_id='', nb_epoch=5, nb_filter=1000, filter_lens='1,2,3
             dropout_emb, backprop_emb, word2vec_init, reg)
     trainer.compile_model(metric, optimizer, lr, loss)
 
-    # get study indices to train on based on k most popular reviews
+    # Load cdnos
     df = pd.read_csv('../data/extra/pico_cdsr.csv', index_col=0)
-    top_cdnos = set(df.groupby('cdno').size().sort_values(ascending=False).index[:top_k])
-    df = df[df.cdno.map(lambda cdno: cdno in top_cdnos)] # throw out studies we are not using
-    train_idxs = np.array(df.index) # get study indices so we can index into vectorized data
-    cdnos = df.reset_index(drop=True).cdno # get cdnos so we can map studies to their cdno
+    cdnos = np.array(df.groupby('cdno').size().sort_values(ascending=False).index) # sort so we pick the cdnos with the most studies first
+    nb_study = len(cdnos)
+
+    # Split into train and validation
+    from sklearn.cross_validation import train_test_split
+    train_cdno_idxs, val_cdno_idxs = train_test_split(range(nb_study), random_state=1337)
+    first_train, first_val = np.floor(len(train_cdno_idxs)*nb_data), np.floor(len(val_cdno_idxs)*nb_data)
+    train_cdno_idxs = np.sort(train_cdno_idxs)[:first_train.astype('int')]
+    val_cdno_idxs = np.sort(val_cdno_idxs)[:first_val.astype('int')]
+    train_cdnos, val_cdnos = set(cdnos[train_cdno_idxs]), set(cdnos[val_cdno_idxs])
+    train_study_idxs = np.array(df[df.cdno.map(lambda cdno: cdno in train_cdnos)].index)
+    val_study_idxs = np.array(df[df.cdno.map(lambda cdno: cdno in val_cdnos)].index)
+
+    print 'train_idxs, val_idxs', len(train_study_idxs), len(val_study_idxs)
 
     # train
-    fold_idx = 0 # legacy
-    history = trainer.train(train_idxs, train_idxs, nb_epoch, batch_size, nb_train,
-            nb_val, callbacks, fold_idx, metric, fit_generator, top_cdnos, cdnos, nb_sample,
-            log_full)
+    fold_idx, cdnos = 0, np.array(df.cdno) # fold is legacy
+    history = trainer.train(train_study_idxs, val_study_idxs, nb_epoch, batch_size,
+            callbacks, fold_idx, metric, fit_generator, cdnos, nb_sample, log_full)
 
 
 if __name__ == '__main__':
