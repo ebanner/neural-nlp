@@ -42,6 +42,7 @@ from trainers import CNNSiameseTrainer
         nb_data=('the percentage of dataset to use', 'option', None, float),
         nb_sample=('number of reviews sample for computing study similarity', 'option', None, int),
         log_full=('log full tensors with TensorLogger if True and magnitudes otherwise', 'option', None, str),
+        train_size=('number between 0 and 1 for train/test split', 'option', None, float),
 )
 def main(exp_group='', exp_id='', nb_epoch=5, nb_filter=1000, filter_lens='1,2,3', 
         nb_hidden=1, hidden_dim=1024, dropout_prob=.5, dropout_emb='True', reg=0,
@@ -49,7 +50,7 @@ def main(exp_group='', exp_id='', nb_epoch=5, nb_filter=1000, filter_lens='1,2,3
         n_folds=5, optimizer='adam', lr=.001, do_cv='False', metric='loss',
         callbacks='cb,ce,fl,cv,es', trainer='CNNSiameseTrainer', features='',
         inputs='abstracts,outcomes', labels='None', fit_generator='True',
-        loss='hinge', nb_data=2, nb_sample=1000, log_full='False'):
+        loss='hinge', nb_data=1., nb_sample=1000, log_full='False', train_size=.9):
     """Training process
 
     1. Parse command line arguments
@@ -96,15 +97,13 @@ def main(exp_group='', exp_id='', nb_epoch=5, nb_filter=1000, filter_lens='1,2,3
 
     # Split into train and validation
     from sklearn.cross_validation import train_test_split
-    train_cdno_idxs, val_cdno_idxs = train_test_split(range(nb_study), random_state=1337)
+    train_cdno_idxs, val_cdno_idxs = train_test_split(range(nb_study), train_size=train_size, random_state=1337)
     first_train, first_val = np.floor(len(train_cdno_idxs)*nb_data), np.floor(len(val_cdno_idxs)*nb_data)
     train_cdno_idxs = np.sort(train_cdno_idxs)[:first_train.astype('int')]
     val_cdno_idxs = np.sort(val_cdno_idxs)[:first_val.astype('int')]
     train_cdnos, val_cdnos = set(cdnos[train_cdno_idxs]), set(cdnos[val_cdno_idxs])
     train_study_idxs = np.array(df[df.cdno.map(lambda cdno: cdno in train_cdnos)].index)
     val_study_idxs = np.array(df[df.cdno.map(lambda cdno: cdno in val_cdnos)].index)
-
-    print 'train_idxs, val_idxs', len(train_study_idxs), len(val_study_idxs)
 
     # train
     fold_idx, cdnos = 0, np.array(df.cdno) # fold is legacy

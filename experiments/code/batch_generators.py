@@ -19,7 +19,7 @@ def pair_generator(cdnos, nb_sample=128, phase=0, exact_only=False, seed=None):
     called by training generator.
 
     """
-    random = np.random.RandomState(seed) if seed else np.random.get_state() # for reproducibility!
+    random = np.random.RandomState(seed) if seed else np.random # for reproducibility!
     nb_train, cdno_set = len(cdnos), set(np.unique(cdnos))
 
     while True:
