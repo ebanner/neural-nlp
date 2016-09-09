@@ -54,7 +54,7 @@ class StudySimilarityLogger(Callback):
         Parameters
         ----------
         X_source : vectorized studies
-        X_target : vectorized summaries
+        X_target : vectorized studies where X_target[i] has the same cdno as X_source[i]
         cdnos : mapping from study indexes to their cdno
         nb_sample : number of studies to evaluate
         phase : 1 for train and 0 for test

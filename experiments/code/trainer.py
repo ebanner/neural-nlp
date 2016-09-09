@@ -20,7 +20,7 @@ from support import per_class_f1s, per_class_accs, stratified_batch_generator
 from loggers import weights, updates, update_ratios, gradients, activations
 import loggers
 
-from batch_generators import study_summary_generator, pair_generator
+from batch_generators import study_target_generator
 
 from callbacks import Flusher, TensorLogger, CSVLogger, StudyLogger, StudySimilarityLogger
 
@@ -145,13 +145,14 @@ class Trainer:
 
         # get a batch of training data as some callbacks require it
         gen_args = {'X_study': X_study[train_idxs],
-                    'X_summary': X_summary[train_idxs],
-                    'batch_size': batch_size,
+                    'X_target': X_summary[train_idxs],
+                    'nb_sample': batch_size,
                     'cdnos': cdnos[train_idxs],
                     'exp_group': self.exp_group,
                     'exp_id': self.exp_id,
+                    'seed': 1337, # random seed
         }
-        [X_source, X_target], y = next(study_summary_generator(**gen_args))
+        [X_source, X_target], y = next(study_target_generator(**gen_args))
         loggers.FULL = log_full # whether to log full tensors
         weight_str = '../store/weights/{}/{}/{}-{}.h5' # where to save model weights
 
@@ -164,9 +165,10 @@ class Trainer:
                              monitor='loss', # every time training loss goes down
                              mode='min')
 
-        study_study_pairs = pair_generator(cdnos[val_idxs], nb_sample=nb_val, exact_only=False)
-        source_idxs, target_idxs = next(study_study_pairs) # validation
-        ss = StudySimilarityLogger(X_study[source_idxs], X_study[target_idxs])
+        study_study_batch = study_target_generator(X_study[val_idxs], X_study[val_idxs],
+                cdnos[val_idxs], self.exp_group, self.exp_id, nb_sample=nb_val, seed=1337, full=True)
+        [X_source_val, X_target_val], y = next(study_study_batch)
+        ss = StudySimilarityLogger(X_source_val, X_target_val)
 
         es = EarlyStopping(monitor='loss', patience=10, verbose=2, mode='min')
         fl = Flusher()
@@ -188,7 +190,7 @@ class Trainer:
         self.callbacks = [callback_dict[cb_name] for cb_name in callback_list]
 
         # start training
-        gen_study_summary_batches = study_summary_generator(**gen_args) # training
+        gen_study_summary_batches = study_target_generator(**gen_args) # training
 
         self.model.fit_generator(gen_study_summary_batches,
                                  samples_per_epoch=(nb_train/batch_size)*batch_size,
