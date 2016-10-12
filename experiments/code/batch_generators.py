@@ -2,86 +2,118 @@ import numpy as np
 import pandas as pd
 
 
-def pair_generator(nb_train, cdnos, top_cdnos, nb_sample=128, phase=0, exact_only=False):
-    """Generator for generating batches of source_idxs to target_idxs
+def valid_pairs_generator(cdnos, nb_sample, cdno_matching, seed, full):
+    """Generator for generating batches of source_idxs to valid corrupt_idxs. The
+    definition of "valid" is determined by the value of `cdno_matching`
 
     Parameters
     ----------
-    nb_train : total number of studies (and abstracts)
     cdnos : mapping from study indexes to their cdno
-    top_cdnos : set of `cdnos.unique()`
     nb_sample : number of studies to evaluate
-    phase : 1 for train and 0 for test
-    target : token for determining what `target_idxs` will be
-
-    Returns {(study_idxs, study_idxs)} if `target` == 'study' and {(study_idxs,
-    summary_idxs)} if `target` == 'summary. In practice, `target` == 'study'
-    when when called by StudySimilarityLogger and `target` == 'summary' when
-    called by training generator.
+    cdno_matching : valid_idxs[i] == source_idxs[i] if True else valid_idxs[i] only
+    has to have the same cdno as source_idxs[i]
+    seed : int to use for the random seed
+    full : return batches of the form [range(nb_cdno)] -> [valid_studies]
 
     """
+    random = np.random.RandomState(seed) if seed else np.random # for reproducibility!
+    nb_cdno, cdno_set = len(cdnos), set(np.unique(cdnos))
+
+    # dict to sample studies with same cdno
+    cdno2valid_study_idxs = {}
+    for cdno in cdno_set:
+        cdno_idxs = set(np.argwhere(cdnos == cdno).flatten())
+        cdno2valid_study_idxs[cdno] = cdno_idxs
+
     while True:
         # sample study indices
-        study_idxs = np.random.choice(nb_train, size=nb_sample)
-
-        # build dicts to enable sampling corrupt studies
-        all_cdno_idxs = set(np.arange(nb_train))
-        cdno2corrupt_study_idxs = {}
-        for cdno in top_cdnos:
-            cdno_idxs = set(np.argwhere(cdnos == cdno).flatten())
-            cdno2corrupt_study_idxs[cdno] = list(all_cdno_idxs - cdno_idxs)
-            
-        target_idxs = study_idxs.copy()
-        if not exact_only:
-            cdno2valid_study_idxs = {}
-            for cdno in top_cdnos:
-                cdno_idxs = set(np.argwhere(cdnos == cdno).flatten())
-                cdno2valid_study_idxs[cdno] = cdno_idxs
-                
+        study_idxs = random.choice(nb_cdno, size=nb_sample, replace=False) if not full else np.array(range(nb_sample))
+        valid_idxs = study_idxs.copy() # create valid indices
+        if not cdno_matching:
             # find study idxs in the same study
-            valid_range = range(nb_sample/2)
-            for i, study_idx in zip(valid_range, study_idxs[:nb_sample/2]):
+            for i, study_idx in enumerate(study_idxs):
                 cdno = cdnos[study_idx]
                 valid_study_idxs = cdno2valid_study_idxs[cdno]
                 valid_study_idxs = valid_study_idxs - set([study_idx]) # remove study iteself from consideration
-                valid_study_idx = np.random.choice(list(valid_study_idxs))
-                target_idxs[i] = valid_study_idx
+                valid_study_idx = random.choice(list(valid_study_idxs))
+                valid_idxs[i] = valid_study_idx
                 
-        # always compute corrupt idxs same way
-        corrupt_range = range(nb_sample/2, nb_sample)
-        for j, study_idx in zip(corrupt_range, study_idxs[nb_sample/2:]):
+        yield study_idxs, valid_idxs
+
+def corrupt_pairs_generator(cdnos, nb_sample, seed, full):
+    """Generator for generating batches of source_idxs to valid corrupt_idxs
+    
+    Parameters
+    ----------
+    cdnos : list of cdnos which identify studies
+    nb_sample : number of pairs to generate
+    seed : random seed integer value
+    full : return batches of the form [range(nb_cdno)] -> [corrupt_studies]
+    
+    """
+    random = np.random.RandomState(seed) if seed else np.random # for reproducibility!
+    nb_cdno, cdno_set = len(cdnos), set(np.unique(cdnos))
+
+    # dict to sample studies with same cdno
+    all_cdno_idxs = set(np.arange(nb_cdno))
+    cdno2corrupt_study_idxs = {}
+    for cdno in cdno_set:
+        cdno_idxs = set(np.argwhere(cdnos == cdno).flatten())
+        cdno2corrupt_study_idxs[cdno] = list(all_cdno_idxs - cdno_idxs)
+
+    while True:
+        # sample study indices
+        study_idxs = random.choice(nb_cdno, size=nb_sample, replace=False) if not full else np.array(range(nb_sample))
+        corrupt_idxs = np.zeros_like(study_idxs) # create corrupt idxs
+        for i, study_idx in enumerate(study_idxs):
             cdno = cdnos[study_idx]
             corrupt_study_idxs = cdno2corrupt_study_idxs[cdno]
-            corrupt_study_idx = np.random.choice(corrupt_study_idxs)
-            target_idxs[j] = corrupt_study_idx
+            corrupt_study_idx = random.choice(corrupt_study_idxs)
+            corrupt_idxs[i] = corrupt_study_idx
 
-        yield study_idxs, target_idxs
+        yield study_idxs, corrupt_idxs
 
-def study_summary_generator(X_study, X_summary, cdnos, top_cdnos, exp_group,
-        exp_id, batch_size=128, phase=0, exact_only=False):
-    """Wrapper generator around pair_generator() for yielding batches of
-    ([study, summary], y) pairs.
+def study_target_generator(X_study, X_target, cdnos, exp_group, exp_id, nb_sample=128, seed=None, full=False):
+    """Wrapper generator around valid_pairs_generator() and
+    corrupt_pairs_generator() for yielding batches of ([study, target], y)
+    pairs.
 
-    The first half of pairs are of the form ([study, corresponding-summary], y)
-    and second half are of the form ([study, summary-from-different-review], y).
+    Parameters
+    ----------
+    X_study : vectorized studies
+    X_target : either X_study or X_summary
+    cdnos : corresponding cdno list
+    seed : the random seed to use
+    nb_sample : number of samples to return
+
+    The first half of pairs are of the form ([study, corresponding-summary],  1)
+    and second half are of the form ([study, summary-from-different-review], -1).
 
     """
-    y = np.full(shape=[batch_size, 1], fill_value=-1, dtype=np.int)
-    y[:batch_size/2, 0] = 1 # first half of samples are good always
+    cdno_matching = not np.all(X_study == X_target) # if target is also studies then we don't want exact matching
+    nb_sample = nb_sample*2 if full else nb_sample
 
-    study_summary_batch = pair_generator(nb_train=len(X_study),
-                                         cdnos=cdnos,
-                                         top_cdnos=top_cdnos,
-                                         nb_sample=batch_size,
-                                         exact_only=True)
+    # construct y
+    y = np.full(shape=[nb_sample, 1], fill_value=-1, dtype=np.int)
+    y[:nb_sample/2, 0] = 1 # first half of samples are good always
+
+    # generators
+    valid_study_summary_batch = valid_pairs_generator(cdnos, nb_sample/2, cdno_matching, seed, full)
+    corrupt_study_summary_batch = corrupt_pairs_generator(cdnos, nb_sample/2, seed, full)
+
     epoch = 0
     while True:
-        study_idxs, summary_idxs = next(study_summary_batch)
-        df = pd.DataFrame({'epoch': [epoch]*batch_size, 'study_idx': study_idxs, 'summary_idxs': summary_idxs})
+        study_idxs, valid_summary_idxs = next(valid_study_summary_batch)
+        more_study_idxs, corrupt_summary_idxs = next(corrupt_study_summary_batch)
+
+        study_idxs = np.concatenate([study_idxs, more_study_idxs])
+        summary_idxs = np.concatenate([valid_summary_idxs, corrupt_summary_idxs])
+
+        df = pd.DataFrame({'epoch': [epoch]*nb_sample, 'study_idx': study_idxs, 'summary_idxs': summary_idxs})
         df.to_csv('../store/batch_idxs/{}/{}.csv'.format(exp_group, exp_id), 
                   index=False,
                   mode='a' if epoch > 0 else 'w',
                   header=epoch==0)
 
-        yield [X_study[study_idxs], X_summary[summary_idxs]], y
+        yield [X_study[study_idxs], X_target[summary_idxs]], y
         epoch += 1

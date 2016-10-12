@@ -48,14 +48,13 @@ class StudySimilarityLogger(Callback):
     reviews.
     
     """
-    def __init__(self, X_study, X_summary, top_cdnos, cdnos, nb_sample=1000, phase=0):
+    def __init__(self, X_source, X_target, phase=0):
         """Save variables and sample study indices
 
         Parameters
         ----------
-        X_study : vectorized studies
-        X_summary : vectorized summaries
-        top_cdnos : set of `cdnos.unique()`
+        X_source : vectorized studies
+        X_target : vectorized studies where X_target[i] has the same cdno as X_source[i]
         cdnos : mapping from study indexes to their cdno
         nb_sample : number of studies to evaluate
         phase : 1 for train and 0 for test
@@ -63,18 +62,10 @@ class StudySimilarityLogger(Callback):
         """
         super(Callback, self).__init__()
 
-        self.X_study, self.X_summary = X_study, X_summary
+        self.X_source, self.X_target = X_source, X_target
         self.phase = phase
-        self.nb_sample = nb_sample
-
-        from batch_generators import pair_generator
-        study_study_pairs = pair_generator(nb_train=len(X_study),
-                                           cdnos=cdnos,
-                                           top_cdnos=top_cdnos,
-                                           nb_sample=1000,
-                                           exact_only=False)
-
-        self.source_idxs, self.target_idxs = next(study_study_pairs)
+        self.nb_sample = len(self.X_source)
+        assert len(self.X_target) == self.nb_sample
 
     def on_train_begin(self, logs={}):
         """Build keras function to produce vectorized studies
@@ -84,21 +75,21 @@ class StudySimilarityLogger(Callback):
         
         """
         # build keras function to get study embeddings
-        inputs = self.model.inputs + [K.learning_phase()]
+        inputs = [self.model.inputs[0], K.learning_phase()]
         outputs = self.model.get_layer('study').output
         self.embed_studies = K.function(inputs, [outputs])
 
     def on_epoch_end(self, epoch, logs={}):
         """Compute study similarity from the same review and different reviews"""
 
-        source_vecs = self.embed_studies([self.X_study[self.source_idxs], self.X_summary, self.phase])[0]
-        target_vecs = self.embed_studies([self.X_study[self.target_idxs], self.X_summary, self.phase])[0]
+        source_vecs = self.embed_studies([self.X_source, self.phase])[0]
+        target_vecs = self.embed_studies([self.X_target, self.phase])[0]
 
         score = np.sum(source_vecs*target_vecs, axis=1) # dot corresponding entries
         same_study_mean = score[:self.nb_sample/2].mean()
         different_study_mean = score[self.nb_sample/2:].mean()
 
-        # this should be high when we're doing well
+        # this should be big and positive when we're doing well
         logs['similarity_score'] = same_study_mean - different_study_mean
 
 class TensorLogger(Callback):
@@ -261,20 +252,19 @@ class StudyLogger(Callback):
     Dump study vectors every time we reach a new best for study similarity.
     
     """
-    def __init__(self, X_abstract, X_summary, exp_group, exp_id):
+    def __init__(self, X_study, exp_group, exp_id):
         """Save variables
 
         Parameters
         ----------
-        X_abstract : vectorized abstracts
-        X_summary : vectorized summaries
+        X_study : vectorized abstracts
         exp_group : experiment group
         exp_id : experiment id
 
         """
         super(Callback, self).__init__()
 
-        self.X_abstract, self.X_summary = X_abstract, X_summary
+        self.X_study = X_study
         self.exp_group, self.exp_id = exp_group, exp_id
 
         self.dump_loc = '../store/study_vecs/{}/{}.p'.format(self.exp_group, self.exp_id)
@@ -283,10 +273,10 @@ class StudyLogger(Callback):
     def on_train_begin(self, logs={}):
         """Define keras function for computing study embeddings"""
 
-        inputs = self.model.inputs + [K.learning_phase()]
-        outputs = self.model.get_layer('study_vec').output
+        inputs = [self.model.inputs[0], K.learning_phase()] # don't need summary
+        outputs = self.model.get_layer('study').output
 
-        self.embed_abstracts = K.function(inputs, [outputs]) # don't need summary to compute study embedding
+        self.embed_abstracts = K.function(inputs, [outputs])
 
     def on_epoch_end(self, epoch, logs={}):
         """Run all abstracts through model and dump the embeddings"""
@@ -296,5 +286,5 @@ class StudyLogger(Callback):
             return # only log study vectors when we reach a new best similarity score
 
         TEST_MODE = 0 # learning phase of 0 for test mode (i.e. do *not* apply dropout)
-        abstract_vecs = self.embed_abstracts([self.X_abstract, self.X_summary, TEST_MODE])
+        abstract_vecs = self.embed_abstracts([self.X_study, TEST_MODE])
         pickle.dump(abstract_vecs[0], open(self.dump_loc, 'w'))
