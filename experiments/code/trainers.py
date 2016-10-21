@@ -41,16 +41,16 @@ class CNNSiameseTrainer(Trainer):
                                  name='study')
 
         # summary vec
-        summary = Input(shape=[self.vecs['outcomes'].maxlen], dtype='int32')
-        embedded_summary = Embedding(output_dim=self.vecs['outcomes'].word_dim,
-                                     input_dim=self.vecs['outcomes'].vocab_size,
-                                     input_length=self.vecs['outcomes'].maxlen,
+        summary = Input(shape=[self.vecs[self.summary_type].maxlen], dtype='int32')
+        embedded_summary = Embedding(output_dim=self.vecs[self.summary_type].word_dim,
+                                     input_dim=self.vecs[self.summary_type].vocab_size,
+                                     input_length=self.vecs[self.summary_type].maxlen,
                                      W_regularizer=l2(reg))(summary)
 
         summary_vec = cnn_embed(embedded_summary,
                                 filter_lens,
                                 nb_filter,
-                                self.vecs['outcomes'].maxlen,
+                                self.vecs[self.summary_type].maxlen,
                                 reg,
                                 name='summary')
 

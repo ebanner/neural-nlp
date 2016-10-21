@@ -48,13 +48,14 @@ class StudySimilarityLogger(Callback):
     reviews.
     
     """
-    def __init__(self, X_source, X_target, phase=0):
+    def __init__(self, X_source, X_target, study_dim, batch_size=128, phase=0):
         """Save variables and sample study indices
 
         Parameters
         ----------
         X_source : vectorized studies
         X_target : vectorized studies where X_target[i] has the same cdno as X_source[i]
+        study_dim : dimension of study vectors
         cdnos : mapping from study indexes to their cdno
         nb_sample : number of studies to evaluate
         phase : 1 for train and 0 for test
@@ -65,6 +66,8 @@ class StudySimilarityLogger(Callback):
         self.X_source, self.X_target = X_source, X_target
         self.phase = phase
         self.nb_sample = len(self.X_source)
+        self.study_dim = study_dim
+        self.batch_size = batch_size
         assert len(self.X_target) == self.nb_sample
 
     def on_train_begin(self, logs={}):
@@ -82,8 +85,13 @@ class StudySimilarityLogger(Callback):
     def on_epoch_end(self, epoch, logs={}):
         """Compute study similarity from the same review and different reviews"""
 
-        source_vecs = self.embed_studies([self.X_source, self.phase])[0]
-        target_vecs = self.embed_studies([self.X_target, self.phase])[0]
+        source_vecs, target_vecs = np.zeros([len(self.X_source), self.study_dim]), np.zeros([len(self.X_target), self.study_dim])
+        i, bs = 0, self.batch_size
+        while i*bs < self.nb_sample:
+            result = self.embed_studies([self.X_source[i*bs:(i+1)*bs], self.phase])[0]
+            source_vecs[i*bs:(i+1)*bs] = result
+            target_vecs[i*bs:(i+1)*bs] = self.embed_studies([self.X_target[i*bs:(i+1)*bs], self.phase])[0]
+            i += 1
 
         score = np.sum(source_vecs*target_vecs, axis=1) # dot corresponding entries
         same_study_mean = score[:self.nb_sample/2].mean()
