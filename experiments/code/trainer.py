@@ -33,7 +33,7 @@ class Trainer:
     3. Calls fit() to train
 
     """
-    def __init__(self, exp_group, exp_id, hyperparam_dict):
+    def __init__(self, exp_group, exp_id, hyperparam_dict, summary_type):
         """Set attributes
 
         Attributes
@@ -45,6 +45,7 @@ class Trainer:
         self.exp_group = exp_group
         self.exp_id = exp_id
         self.hyperparam_dict = hyperparam_dict
+        self.summary_type = summary_type
 
     def load_texts(self, inputs):
         """Load inputs
@@ -141,7 +142,7 @@ class Trainer:
 
         # train and validation sets
         nb_train, nb_val = len(train_idxs), len(val_idxs)
-        X_study, X_summary = self.vecs['abstracts'].X, self.vecs['outcomes']
+        X_study, X_summary = self.vecs['abstracts'].X, self.vecs[self.summary_type].X
 
         # get a batch of training data as some callbacks require it
         gen_args = {'X_study': X_study[train_idxs],
@@ -168,7 +169,7 @@ class Trainer:
         study_study_batch = study_target_generator(X_study[val_idxs], X_study[val_idxs],
                 cdnos[val_idxs], self.exp_group, self.exp_id, nb_sample=nb_val, seed=1337, full=True)
         [X_source_val, X_target_val], y = next(study_study_batch)
-        ss = StudySimilarityLogger(X_source_val, X_target_val)
+        ss = StudySimilarityLogger(X_source_val, X_target_val, study_dim=self.model.get_layer('study').output_shape[-1])
 
         es = EarlyStopping(monitor='loss', patience=10, verbose=2, mode='min')
         fl = Flusher()
