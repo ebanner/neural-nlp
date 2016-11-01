@@ -64,8 +64,8 @@ def main(exp_group='', exp_id='', nb_epoch=5, dropout_pico='True', reg=0,
 
     # load data and supervision
     trainer = eval(trainer)(exp_group, exp_id, hyperparam_dict, drug_name)
-    trainer.load_vectors(pico_vectors)
     trainer.load_labels()
+    trainer.load_vectors(pico_vectors)
 
     # set up fold(s)
     nb_example = len(trainer.X[pico_vectors[0]])

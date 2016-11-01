@@ -62,6 +62,15 @@ class Trainer:
                 assert self.nb_train == len(self.vecs[input])
             self.nb_train = len(self.vecs[input])
 
+    def load_labels(self):
+        """Load labels for dataset
+
+        Mainly configure class names and validation data
+
+        """
+        df = pd.read_csv('../data/labels/y.csv').groupby('drug').get_group(self.drug_name)
+        self.drug_idxs, self.y = df.index, np.array(df.label)
+
     def load_vectors(self, pico_vectors):
         """Load pico vectors
         
@@ -74,21 +83,11 @@ class Trainer:
         """
         self.X = OrderedDict()
         for pico_vector in pico_vectors:
-            vector_loc = '../data/vectors/{}/{}.p'.format(self.drug_name, pico_vector)
-            self.X[pico_vector] = pickle.load(open(vector_loc))
+            vector_loc = '../data/vectors/{}.p'.format(pico_vector)
+            X_pico = pickle.load(open(vector_loc)) # load in all vectors
+            self.X[pico_vector] = X_pico[self.drug_idxs] # filter down to only drug ones
 
         self.pico_elements = self.X.keys()
-
-    def load_labels(self):
-        """Load labels for dataset
-
-        Mainly configure class names and validation data
-
-        """
-        y_loc = '../data/labels/{}.csv'.format(self.drug_name)
-
-        self.y = pd.Series.from_csv(y_loc, index_col=None)
-        self.y = np.array(self.y)
 
     def compile_model(self, metric, optimizer, lr, loss):
         """Compile keras model
