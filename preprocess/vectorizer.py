@@ -23,6 +23,17 @@ class Vectorizer:
         self.embeddings = None
         self.word_dim = 300
 
+    def __len__(self):
+        """Return the length of X"""
+
+        return len(self.X)
+
+    def __getitem__(self, given):
+        """Return a slice of X"""
+
+        return self.X[given]
+
+
     def fit(self, texts, maxlen=None, maxlen_ratio=.95):
         """Fit the texts with a keras tokenizer
         
@@ -41,7 +52,6 @@ class Vectorizer:
 
         # set up dicts
         self.word2idx = self.tok.word_index
-        self.word2idx['[0]'] = 0
         self.idx2word = {idx: word for word, idx in self.word2idx.items()}
 
         if not maxlen:
@@ -68,7 +78,11 @@ class Vectorizer:
 
         """
         self.X = self.tok.texts_to_sequences(texts)
-        if do_pad: self.X = sequence.pad_sequences(self.X, maxlen=self.maxlen)
+
+        if do_pad:
+            self.X = sequence.pad_sequences(self.X, maxlen=self.maxlen)
+            self.word2idx['[0]'], self.idx2word[0] = 0, '[0]' # add padding token
+            self.vocab_size += 1
 
         return self.X
 
@@ -81,7 +95,8 @@ class Vectorizer:
         
         """
         self.X = self.tok.texts_to_matrix(texts)
-        self.X = csr_matrix(self.X) # for space-savings
+        self.X = self.X[:, 1:] # ignore the padding token prepended by keras
+        self.X = csr_matrix(self.X) # space-saving
 
         return self.X
 
