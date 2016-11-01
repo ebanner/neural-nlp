@@ -1,45 +1,35 @@
 from collections import OrderedDict
 
-from keras.layers import Input, Embedding, Dropout, Dense, LSTM, merge
-from keras.layers import Convolution1D, MaxPooling1D, Flatten, merge
-from keras.layers import Permute, Flatten, TimeDistributed, RepeatVector, ActivityRegularization
-from keras.layers.convolutional import AveragePooling1D
-from keras.layers.normalization import BatchNormalization
-from keras.regularizers import activity_l1, l2
+from keras.layers import Input, Dropout, Dense, merge
+from keras.layers import Activation
 from keras.models import Model
+from keras.regularizers import l2
 
 from trainer import Trainer
-from support import cnn_embed, per_class_f1s, per_class_accs, average
 
 
-class CNNTrainer(Trainer):
-    """One-input model which embeds the document with CNN ngram filters"""
+class PICOTrainer(Trainer):
+    """Multi-input interpretable PICO architecture
 
-    def build_model(self, nb_filter, filter_lens, nb_hidden, hidden_dim,
-            dropout_prob, dropout_emb, backprop_emb, word2vec_init):
+    Send each PICO vector through a linear layer to a single score which are
+    then concatenated and sent through a linear sigmoid layer.
+    
+    """
+    def build_model(self, dropout_pico, backprop_pico, reg):
 
-        assert len(self.X_vecs) == 1
-        vec = self.X_vecs[0]
+        inputs = OrderedDict()
+        for pico_element in self.pico_elements:
+            inputs[pico_element] = Input(shape=self.X[pico_element].shape[1:])
 
-        # input
-        input = Input(shape=[vec.maxlen], dtype='int32')
+        scores = OrderedDict()
+        for pico_element in self.pico_elements:
+            scores[pico_element] = Dense(output_dim=1, activation='relu')(inputs[pico_element])
 
-        # embedding
-        words = Embedding(output_dim=vec.word_dim,
-                          input_dim=vec.vocab_size,
-                          input_length=vec.maxlen,
-                          weights=[vec.embeddings] if word2vec_init else None,
-                          trainable=backprop_emb)(input)
-        words = Dropout(dropout_emb)(words)
+        # dot vectors and send through sigmoid
+        score = merge(inputs=scores.values(),
+                      mode='concat',
+                      name='pico_scores')
 
-        # extract ngram features with cnn
-        activations = cnn_embed(words, filter_lens, nb_filter, vec.maxlen)
-        hidden = Dropout(dropout_prob)(activations)
+        prob = Dense(output_dim=1, activation='sigmoid')(score)
 
-        for _ in range(nb_hidden-1):
-            hidden = Dense(output_dim=hidden_dim, activation='relu')(hidden)
-            hidden = Dropout(dropout_prob)(hidden)
-
-        probs = Dense(output_dim=self.nb_class, activation='sigmoid')(hidden)
-
-        self.model = Model(input=input, output=probs) # define the model
+        self.model = Model(input=inputs.values(), output=prob)

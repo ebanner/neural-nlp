@@ -10,25 +10,19 @@ import pandas as pd
 
 from sklearn.cross_validation import KFold
 
-from trainers import CNNTrainer
+from trainers import PICOTrainer
 
 
 @plac.annotations(
         exp_group=('the name of the experiment group for loading weights', 'option', None, str),
         exp_id=('id of the experiment - usually an integer', 'option', None, str),
         nb_epoch=('number of epochs', 'option', None, int),
-        nb_filter=('number of filters', 'option', None, int),
-        filter_lens=('length of filters', 'option', None, str),
-        nb_hidden=('number of hidden states', 'option', None, int),
-        hidden_dim=('size of hidden state', 'option', None, int),
-        dropout_prob=('dropout probability', 'option', None, float),
-        dropout_emb=('perform dropout after the embedding layer', 'option', None, str),
+        dropout_pico=('perform dropout after the embedding layer', 'option', None, str),
         reg=('l2 regularization constant', 'option', None, float),
-        backprop_emb=('whether to backprop into embeddings', 'option', None, str),
+        backprop_pico=('whether to backprop into embeddings', 'option', None, str),
         batch_size=('batch size', 'option', None, int),
-        word2vec_init=('initialize embeddings with word2vec', 'option', None, str),
         nb_train=('number of examples to train on', 'option', None, int),
-        dataset=('name of dataset', 'option', None, str),
+        drug_name=('name of drug_name', 'option', None, str),
         n_folds=('number of folds for cross validation', 'option', None, int),
         optimizer=('optimizer to use during training', 'option', None, str),
         lr=('learning rate to use during training', 'option', None, float),
@@ -36,17 +30,16 @@ from trainers import CNNTrainer
         metric=('metric to use during training (acc or f1)', 'option', None, str),
         callbacks=('list callbacks to use during training', 'option', None, str),
         trainer=('type of trainer to use', 'option', None, str),
-        features=('list of additional features to use', 'option', None, str),
         inputs=('data to use for input', 'option', None, str),
-        labels=('labels to use', 'option', None, str),
+        pico_vectors=('list of pico vectors to use as input', 'option', None, str),
+        loss=('type of loss to use during training', 'option', None, str),
 )
-def main(exp_group='', exp_id='', nb_epoch=5, nb_filter=1000, filter_lens='1,2,3', 
-        nb_hidden=1, hidden_dim=1024, dropout_prob=.5, dropout_emb='True', reg=0,
-        backprop_emb='False', batch_size=128, word2vec_init='False', nb_train=100000,
-        dataset='ICHI2016', n_folds=5, optimizer='adam', lr=.001,
-        do_cv='False', metric='val_main_acc', callbacks='cb,ce,fl,cv,es',
-        trainer='CNNTrainer', use_masking='True', features='', inputs='abstracts',
-        labels='outcomes'):
+def main(exp_group='', exp_id='', nb_epoch=5, dropout_pico='True', reg=0,
+        backprop_pico='False', batch_size=128, nb_train=100000,
+        drug_name='CalciumChannelBlockers', n_folds=5, optimizer='adam',
+        lr=.001, do_cv='False', metric='acc', callbacks='cb,ce,fl,cv,es',
+        trainer='PICOTrainer', inputs='', pico_vectors='populations,outcomes',
+        loss='binary_crossentropy'):
     """Training process
 
     1. Parse command line arguments
@@ -62,35 +55,29 @@ def main(exp_group='', exp_id='', nb_epoch=5, nb_filter=1000, filter_lens='1,2,3
     hyperparam_dict = {pname: pvalue for pname, pvalue in zip(pnames, pvalues)}
 
     # parse command line options
-    filter_lens = [int(filter_len) for filter_len in filter_lens.split(',')]
-    backprop_emb = True if backprop_emb == 'True' else False
-    dropout_emb = dropout_prob if dropout_emb == 'True' else 1e-100
-    word2vec_init = True if word2vec_init == 'True' else False
+    backprop_pico = True if backprop_pico == 'True' else False
+    dropout_pico = dropout_pico if dropout_pico == 'True' else 1e-100
     do_cv = True if do_cv == 'True' else False
-    nb_filter /= len(filter_lens) # make it so there are only nb_filter *total* - NOT nb_filter*len(filter_lens)
     callbacks = callbacks.split(',')
-    features = features.split(',') if features != '' else []
     inputs = inputs.split(',')
+    pico_vectors = pico_vectors.split(',')
 
     # load data and supervision
-    trainer = eval(trainer)(dataset, exp_group, exp_id, hyperparam_dict, trainer)
-    trainer.load_texts(inputs)
-    trainer.load_auxiliary(features)
-    trainer.load_labels(labels)
+    trainer = eval(trainer)(exp_group, exp_id, hyperparam_dict, drug_name)
+    trainer.load_vectors(pico_vectors)
+    trainer.load_labels()
 
     # set up fold(s)
-    nb_texts = len(trainer.X_vecs[0].X)
-    folds = KFold(nb_texts, n_folds, shuffle=True, random_state=1337) # for reproducibility!
+    nb_example = len(trainer.X[pico_vectors[0]])
+    folds = KFold(nb_example, n_folds, shuffle=True, random_state=1337) # for reproducibility!
     if not do_cv:
         folds = list(folds)[:1] # only do the first fold if not doing cross-valiadtion
 
     # cross-fold training
     for fold_idx, (train_idxs, val_idxs) in enumerate(folds):
         # model
-        trainer.build_model(nb_filter, filter_lens, nb_hidden, hidden_dim,
-                dropout_prob, dropout_emb, backprop_emb, word2vec_init)
-        trainer.compile_model(metric, optimizer, lr)
-        trainer.save_architecture()
+        trainer.build_model(dropout_pico, backprop_pico, reg)
+        trainer.compile_model(metric, optimizer, lr, loss)
 
         # train
         history = trainer.train(train_idxs, val_idxs, nb_epoch, batch_size,
