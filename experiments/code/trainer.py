@@ -19,7 +19,7 @@ from support import per_class_f1s, per_class_accs
 from loggers import weights, updates, update_ratios, gradients, activations
 import loggers
 
-from callbacks import Flusher, TensorLogger, CSVLogger, ProbaLogger
+from callbacks import Flusher, TensorLogger, CSVLogger, ProbaLogger, AUCLogger
 
 
 class Trainer:
@@ -44,50 +44,42 @@ class Trainer:
         self.hyperparam_dict = hyperparam_dict
         self.drug_name = drug_name
 
-    def load_texts(self, inputs):
-        """Load inputs
-        
-        Parameters
-        ----------
-        inputs : list of vectorizer names (expected to be in ../data/vectorizers)
-        
-        """
-        if not inputs:
-            return
-
-        self.vecs, self.nb_train = OrderedDict(), None
-        for input in inputs:
-            self.vecs[input] = pickle.load(open('../data/vectorizers/{}.p'.format(input))) 
-            if self.nb_train:
-                assert self.nb_train == len(self.vecs[input])
-            self.nb_train = len(self.vecs[input])
-
-    def load_labels(self):
+    def load_labels(self, outputs):
         """Load labels for dataset
 
         Mainly configure class names and validation data
 
         """
-        df = pd.read_csv('../data/labels/y.csv').groupby('drug').get_group(self.drug_name)
-        self.drug_idxs, self.y = df.index, np.array(df.label)
+        self.outputs = outputs # not actually doing anything with this here...
 
-    def load_vectors(self, pico_vectors):
+        self.y_df = pd.read_csv('../data/labels/y.csv').groupby('drug').get_group(self.drug_name)
+        self.weight_df = self.y_df.copy()
+
+        # Adjust sample weights for missing labels
+        first_label = self.y_df.columns[[i+1 for i, col in enumerate(self.y_df.columns) if col == 'drug'][0]] # just apply to labels
+        self.weight_df.ix[:, first_label:] = self.weight_df.ix[:, first_label:].apply(lambda col: col.map({1: 1, 0: 1, -1: 0}))
+        self.drug_idxs = self.y_df.index
+
+    def load_vectors(self, inputs):
         """Load pico vectors
         
         Parameters
         ----------
-        features : list of features to load
-        mode : concatenate features together into one vector if `concat` and
-        keep them as separate inputs if `channels`
+        inputs : names of vectors to use in the model
         
         """
         self.X = OrderedDict()
-        for pico_vector in pico_vectors:
-            vector_loc = '../data/vectors/{}.p'.format(pico_vector)
-            X_pico = pickle.load(open(vector_loc)) # load in all vectors
-            self.X[pico_vector] = X_pico[self.drug_idxs] # filter down to only drug ones
+        for vector_type in inputs:
+            vector_loc = '../data/vectors/{}.p'.format(vector_type)
+            X = pickle.load(open(vector_loc)) # load in all vectors
+            self.X[vector_type] = X[self.drug_idxs] # filter down to only drug ones
 
-        self.pico_elements = self.X.keys()
+        self.y, self.sample_weight = OrderedDict(), OrderedDict()
+        for output in self.outputs:
+            self.y[output] = np.array(self.y_df[output][self.drug_idxs])
+            self.sample_weight[output] = np.array(self.weight_df[output][self.drug_idxs])
+
+        self.inputs = inputs
 
     def compile_model(self, metric, optimizer, lr, loss):
         """Compile keras model
@@ -118,15 +110,20 @@ class Trainer:
         open(model_loc, 'w').write(json_string)
 
     def train(self, train_idxs, val_idxs, nb_epoch, batch_size, nb_train, callback_list, fold, metric):
-        """Set up callbacks
+        """Carve up train/val split and call fit() with callbacks"""
 
-        It's expected that the implementing subclass actually does the training
-        (i.e. calls fit()).
+        # split inputs
+        X_train, X_val = OrderedDict(), OrderedDict()
+        for input, X in self.X.items():
+            X_train[input], X_val[input] = X[train_idxs][:nb_train], X[val_idxs]
 
-        """
-        # splits
-        X_train, X_val = [X[train_idxs][:nb_train] for X in self.X.values()], [X[val_idxs] for X in self.X.values()]
-        y_train, y_val = self.y[train_idxs][:nb_train], self.y[val_idxs]
+        # split labels and sample weights
+        y_train, y_val = OrderedDict(), OrderedDict()
+        weight_train, weight_val = OrderedDict(), OrderedDict()
+        for output, y, weight in zip(self.outputs, self.y.values(), self.sample_weight.values()):
+            prob_str = '{}-prob'.format(output)
+            y_train[prob_str], y_val[prob_str] = y[train_idxs][:nb_train], y[val_idxs]
+            weight_train[prob_str], weight_val[prob_str] = weight[train_idxs][:nb_train], weight[val_idxs]
 
         # callbacks
         weights_str = '../store/weights/{}/{}/{}-{}.h5'
@@ -140,22 +137,25 @@ class Trainer:
         es = EarlyStopping(monitor='loss', patience=10, verbose=2, mode='min')
         fl = Flusher()
         cv = CSVLogger(self.exp_group, self.exp_id, self.hyperparam_dict, fold)
-        tl = TensorLogger(X_train, y_train, tensor_funcs=[weights, updates, update_ratios, gradients, activations])
+        # tl = TensorLogger(X_train, y_train, tensor_funcs=[weights, updates, update_ratios, gradients, activations])
+        al = AUCLogger(X_val, y_val)
 
         # filter down callbacks
         callback_dict = {'cb': cb, # checkpoint best
                          'ce': ce, # checkpoint every
-                         'tl': tl, # tensor logger
+                         # 'tl': tl, # tensor logger
                          'fl': fl, # flusher
                          'es': es, # early stopping
                          'cv': cv, # should go *last* as other callbacks populate `logs` dict
+                         'al': al, # auc logger
         }
         self.callbacks = [callback_dict[cb_name] for cb_name in callback_list]
 
         # train
-        history = self.model.fit(X_train, y_train,
+        history = self.model.fit(dict(X_train), dict(y_train),
                                  batch_size=batch_size,
                                  nb_epoch=nb_epoch,
                                  verbose=2,
-                                 validation_data=(X_val, y_val),
-                                 callbacks=self.callbacks)
+                                 callbacks=self.callbacks,
+                                 validation_data=(dict(X_val), dict(y_val), dict(weight_val)) if 'al' not in callback_list else None,
+                                 sample_weight=dict(weight_train))

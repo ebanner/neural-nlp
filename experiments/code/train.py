@@ -10,7 +10,7 @@ import pandas as pd
 
 from sklearn.cross_validation import KFold
 
-from trainers import PICOTrainer
+from trainers import PICOTrainer, LogisticRegressionTrainer
 
 
 @plac.annotations(
@@ -30,16 +30,18 @@ from trainers import PICOTrainer
         metric=('metric to use during training (acc or f1)', 'option', None, str),
         callbacks=('list callbacks to use during training', 'option', None, str),
         trainer=('type of trainer to use', 'option', None, str),
-        inputs=('data to use for input', 'option', None, str),
-        pico_vectors=('list of pico vectors to use as input', 'option', None, str),
+        inputs=('list of input vectors to use', 'option', None, str),
+        outputs=('list of predictors', 'option', None, str),
         loss=('type of loss to use during training', 'option', None, str),
+        interaction_layer=('element-wise multiplication if `mul` and fully-connected otherwise', 'option', None, str),
 )
 def main(exp_group='', exp_id='', nb_epoch=5, dropout_pico='True', reg=0,
         backprop_pico='False', batch_size=128, nb_train=100000,
         drug_name='CalciumChannelBlockers', n_folds=5, optimizer='adam',
         lr=.001, do_cv='False', metric='acc', callbacks='cb,ce,fl,cv,es',
-        trainer='PICOTrainer', inputs='', pico_vectors='populations,outcomes',
-        loss='binary_crossentropy'):
+        trainer='PICOTrainer', inputs='populations,outcomes',
+        outputs='populations,outcomes,label', loss='binary_crossentropy',
+        interaction_layer='mul'):
     """Training process
 
     1. Parse command line arguments
@@ -60,15 +62,15 @@ def main(exp_group='', exp_id='', nb_epoch=5, dropout_pico='True', reg=0,
     do_cv = True if do_cv == 'True' else False
     callbacks = callbacks.split(',')
     inputs = inputs.split(',')
-    pico_vectors = pico_vectors.split(',')
+    outputs = outputs.split(',')
 
     # load data and supervision
     trainer = eval(trainer)(exp_group, exp_id, hyperparam_dict, drug_name)
-    trainer.load_labels()
-    trainer.load_vectors(pico_vectors)
+    trainer.load_labels(outputs)
+    trainer.load_vectors(inputs)
 
     # set up fold(s)
-    nb_example = len(trainer.X[pico_vectors[0]])
+    nb_example = len(trainer.X[inputs[0]])
     folds = KFold(nb_example, n_folds, shuffle=True, random_state=1337) # for reproducibility!
     if not do_cv:
         folds = list(folds)[:1] # only do the first fold if not doing cross-valiadtion
@@ -76,7 +78,7 @@ def main(exp_group='', exp_id='', nb_epoch=5, dropout_pico='True', reg=0,
     # cross-fold training
     for fold_idx, (train_idxs, val_idxs) in enumerate(folds):
         # model
-        trainer.build_model(dropout_pico, backprop_pico, reg)
+        trainer.build_model(dropout_pico, backprop_pico, reg, interaction_layer)
         trainer.compile_model(metric, optimizer, lr, loss)
 
         # train

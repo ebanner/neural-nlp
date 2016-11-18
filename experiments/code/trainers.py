@@ -1,6 +1,6 @@
 from collections import OrderedDict
 
-from keras.layers import Input, Dropout, Dense, merge
+from keras.layers import Input, Dropout, Dense, merge, Lambda
 from keras.layers import Activation
 from keras.models import Model
 from keras.regularizers import l2
@@ -12,24 +12,34 @@ class PICOTrainer(Trainer):
     """Multi-input interpretable PICO architecture
 
     Send each PICO vector through a linear layer to a single score which are
-    then concatenated and sent through a linear sigmoid layer.
+    then multiplied for a final score.
     
     """
-    def build_model(self, dropout_pico, backprop_pico, reg):
+    def build_model(self, dropout_pico, backprop_pico, reg, interaction_layer):
 
         inputs = OrderedDict()
-        for pico_element in self.pico_elements:
-            inputs[pico_element] = Input(shape=self.X[pico_element].shape[1:])
+        for input in self.inputs:
+            inputs[input] = Input(shape=self.X[input].shape[1:], name=input)
 
-        scores = OrderedDict()
-        for pico_element in self.pico_elements:
-            scores[pico_element] = Dense(output_dim=1, activation='relu')(inputs[pico_element])
+        probs, outputs = OrderedDict(), OrderedDict()
+        for input in self.inputs:
+            probs[input] = Dense(output_dim=1, activation='sigmoid', name='{}-prob'.format(input))(inputs[input])
+            if input in self.outputs:
+                outputs[input] = probs[input] # only add prob if it's one of the outputs
 
-        # dot vectors and send through sigmoid
-        score = merge(inputs=scores.values(),
-                      mode='concat',
-                      name='pico_scores')
+        if interaction_layer == 'mul':
+            from support import mul_merge
+            prob = merge(inputs=probs.values(), mode=mul_merge, output_shape=[1], name='label-prob')
+        else:
+            concatted_probs = merge(inputs=probs.values(), mode='concat')
+            prob = Dense(output_dim=1, name='label-prob')(concatted_probs)
 
-        prob = Dense(output_dim=1, activation='sigmoid')(score)
+        self.model = Model(input=inputs.values(), output=[prob]+outputs.values())
 
-        self.model = Model(input=inputs.values(), output=prob)
+class LogisticRegressionTrainer(Trainer):
+    """Logistic regression model"""
+
+    def build_model(self, dropout_pico, backprop_pico, reg, interaction_layer):
+        input = Input(shape=self.X['BoW'].shape[1:], name='BoW')
+        prob = Dense(output_dim=1, activation='sigmoid', W_regularizer=l2(reg), name='label-prob')(input)
+        self.model = Model(input=input, output=prob)

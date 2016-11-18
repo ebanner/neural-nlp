@@ -147,3 +147,12 @@ def cnn_embed(words, filter_lens, nb_filter, max_doclen):
         activations[i] = flattened
 
     return merge(activations, mode='concat') if len(filter_lens) > 1 else flattened
+
+def mul_merge(x):
+    """Custom merge function which does element-wise multiplication between
+    tensors to merge"""
+
+    prod = x[0]
+    for prob_vector in x[1:]:
+        prod *= prob_vector
+    return prod

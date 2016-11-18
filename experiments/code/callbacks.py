@@ -7,7 +7,7 @@ import numpy as np
 import pandas as pd
 
 import scipy
-from sklearn.metrics import f1_score
+from sklearn.metrics import f1_score, roc_auc_score
 
 from keras.callbacks import Callback
 from keras.utils.np_utils import to_categorical
@@ -20,12 +20,11 @@ class Flusher(Callback):
     def on_epoch_end(self, epoch, logs={}):
         sys.stdout.flush()
 
-class ValidationLogger(Callback):
+class F1Logger(Callback):
     """Use to test that `metrics.compute_f1` is implemented correctly"""
 
     def __init__(self, X_val, y_val):
         super(Callback, self).__init__()
-
         self.X_val, self.y_val = X_val, y_val.argmax(axis=1)
 
     def on_epoch_end(self, epoch, logs={}):
@@ -35,6 +34,19 @@ class ValidationLogger(Callback):
 
         print 'scikit f1s:', f1s
         print 'scikit f1:', np.mean(f1s)
+
+class AUCLogger(Callback):
+    """Compute AUC over the validation set"""
+
+    def __init__(self, X_val, y_val):
+        super(Callback, self).__init__()
+        self.X_val = X_val.values() # only take vectors
+        self.y_val = y_val.values()[-1] # only take document-level labels
+
+    def on_epoch_end(self, epoch, logs={}):
+        y_probas = self.model.predict(self.X_val)
+        y_probas = y_probas[-1] if type(y_probas) == list else y_probas # special-case when only 1 output
+        logs['val_auc'] = roc_auc_score(self.y_val, y_probas)
 
 class TensorLogger(Callback):
     """Callback for monitoring value of tensors during training"""
@@ -122,15 +134,11 @@ class CSVLogger(Callback):
         hyperparameters.
         
         """
-        if 'acc' in logs: # fixup strings for visualization code if only using 1 output
-            logs = {metric.replace('acc', 'main_acc'): val for metric, val in logs.items()}
-            logs = {metric.replace('loss', 'main_loss'): val for metric, val in logs.items()}
-
         frame = {metric: [val] for metric, val in logs.items()}
         pd.DataFrame(frame).to_csv(self.train_path,
                                    index=False,
-                                   mode='a', # keep appending to this csv
-                                   header=epoch==0 and not os.path.isfile(self.train_path))
+                                   mode='a' if epoch > 0 else 'w', # overwrite if starting anew if starting anwe
+                                   header=epoch==0)
 
 class ProbaLogger(Callback):
     """Callback for dumping info for error-analysis
