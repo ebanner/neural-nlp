@@ -73,7 +73,7 @@ def corrupt_pairs_generator(cdnos, nb_sample, seed, full):
 
         yield study_idxs, corrupt_idxs
 
-def study_target_generator(X_study, X_target, cdnos, exp_group, exp_id, nb_sample=128,
+def study_target_generator(X_source, X_target, cdnos, exp_group, exp_id, nb_sample=128,
         seed=None, full=False, neg_nb=-1, cdno_matching=True):
     """Wrapper generator around valid_pairs_generator() and
     corrupt_pairs_generator() for yielding batches of ([study, target], y)
@@ -81,8 +81,8 @@ def study_target_generator(X_study, X_target, cdnos, exp_group, exp_id, nb_sampl
 
     Parameters
     ----------
-    X_study : vectorized studies
-    X_target : either X_study or X_summary
+    X_source : vectorized abstracts
+    X_target : either vectorized abstracts or vectorized summaries
     cdnos : corresponding cdno list
     seed : the random seed to use
     nb_sample : number of samples to return
@@ -101,22 +101,14 @@ def study_target_generator(X_study, X_target, cdnos, exp_group, exp_id, nb_sampl
     y[:nb_sample/2, 0] = 1 # first half of samples are good always
 
     # generators
-    valid_study_summary_batch = valid_pairs_generator(cdnos, nb_sample/2, cdno_matching, seed, full)
-    corrupt_study_summary_batch = corrupt_pairs_generator(cdnos, nb_sample/2, seed, full)
+    valid_source_target_batch = valid_pairs_generator(cdnos, nb_sample/2, cdno_matching, seed, full)
+    corrupt_source_target_batch = corrupt_pairs_generator(cdnos, nb_sample/2, seed, full)
 
-    epoch = 0
     while True:
-        study_idxs, valid_summary_idxs = next(valid_study_summary_batch)
-        more_study_idxs, corrupt_summary_idxs = next(corrupt_study_summary_batch)
+        source_idxs, valid_target_idxs = next(valid_source_target_batch)
+        more_source_idxs, corrupt_target_idxs = next(corrupt_source_target_batch)
 
-        study_idxs = np.concatenate([study_idxs, more_study_idxs])
-        summary_idxs = np.concatenate([valid_summary_idxs, corrupt_summary_idxs])
+        source_idxs = np.concatenate([source_idxs, more_source_idxs])
+        target_idxs = np.concatenate([valid_target_idxs, corrupt_target_idxs])
 
-        # df = pd.DataFrame({'epoch': [epoch]*nb_sample, 'study_idx': study_idxs, 'summary_idxs': summary_idxs})
-        # df.to_csv('../store/batch_idxs/{}/{}.csv'.format(exp_group, exp_id), 
-        #           index=False,
-        #           mode='a' if epoch > 0 else 'w',
-        #           header=epoch==0)
-
-        yield [X_study[study_idxs], X_target[summary_idxs]], y
-        epoch += 1
+        yield [X_source[source_idxs], X_target[target_idxs]], y

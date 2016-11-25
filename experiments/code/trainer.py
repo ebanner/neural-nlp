@@ -186,12 +186,10 @@ class Trainer:
 
         # train
         gen_source_target_batches = \
-                study_target_generator(X_study[train_idxs],
-                                       X_target[train_idxs],
+                study_target_generator(X_study[train_idxs], X_target[train_idxs],
                                        nb_sample=batch_size,
                                        cdnos=cdnos[train_idxs],
-                                       exp_group=self.exp_group,
-                                       exp_id=self.exp_id,
+                                       exp_group=self.exp_group, exp_id=self.exp_id,
                                        seed=1337, # for repeatability
                                        neg_nb=-1 if self.loss == 'hinge' else 0,
                                        cdno_matching=self.source!=self.target,
