@@ -57,7 +57,7 @@ class Trainer:
         """
         self.vecs, self.nb_train = OrderedDict(), None
         for input in inputs:
-            self.vecs[input_type] = pickle.load(open('../data/vectorizers/{}.p'.format(input))) 
+            self.vecs[input] = pickle.load(open('../data/vectorizers/{}.p'.format(input))) 
             if self.nb_train:
                 assert self.nb_train == len(self.vecs[input])
             self.nb_train = len(self.vecs[input])

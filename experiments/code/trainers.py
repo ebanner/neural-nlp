@@ -75,9 +75,9 @@ class SharedCNNSiameseTrainer(Trainer):
             dropout_prob, dropout_emb, backprop_emb, word2vec_init, reg, loss):
 
         # Embed model
-        info = self.vecs['source']
+        info = self.vecs['abstracts']
         source = Input(shape=[info.maxlen], dtype='int32')
-        vectorized_source = Embedding(output_dim=info.word_dim, input_dim=info.vocab_size, input_length=info.maxlen, W_regularizer=l2(reg))(input)
+        vectorized_source = Embedding(output_dim=info.word_dim, input_dim=info.vocab_size, input_length=info.maxlen, W_regularizer=l2(reg))(source)
         embedded_source = cnn_embed(vectorized_source, filter_lens, nb_filter, info.maxlen, reg, name='study')
         embed_abstract = Model(input=source, output=embedded_source)
 
