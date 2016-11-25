@@ -10,7 +10,7 @@ import pandas as pd
 
 from sklearn.cross_validation import KFold
 
-from trainers import CNNSiameseTrainer, RNNSiameseTrainer
+from trainers import CNNSiameseTrainer, SharedCNNSiameseTrainer
 
 
 @plac.annotations(
