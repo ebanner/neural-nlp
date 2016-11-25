@@ -10,7 +10,7 @@ import pandas as pd
 
 from sklearn.cross_validation import KFold
 
-from trainers import CNNSiameseTrainer
+from trainers import CNNSiameseTrainer, RNNSiameseTrainer
 
 
 @plac.annotations(
@@ -43,7 +43,7 @@ from trainers import CNNSiameseTrainer
         nb_sample=('number of reviews sample for computing study similarity', 'option', None, int),
         log_full=('log full tensors with TensorLogger if True and magnitudes otherwise', 'option', None, str),
         train_size=('number between 0 and 1 for train/test split', 'option', None, float),
-        summary_type=('`populations`, `interventions`, or `outcomes`', 'option', None, str),
+        target=('type of document to predict', 'option', None, str),
 )
 def main(exp_group='', exp_id='', nb_epoch=5, nb_filter=1000, filter_lens='1,2,3', 
         nb_hidden=1, hidden_dim=1024, dropout_prob=.5, dropout_emb='True', reg=0,
@@ -52,7 +52,7 @@ def main(exp_group='', exp_id='', nb_epoch=5, nb_filter=1000, filter_lens='1,2,3
         callbacks='cb,ce,fl,cv,es', trainer='CNNSiameseTrainer', features='',
         input='abstracts', labels='None', fit_generator='True',
         loss='hinge', nb_train=1., nb_sample=1000, log_full='False', train_size=.97,
-        summary_type='outcomes'):
+        target='outcomes'):
     """Training process
 
     1. Parse command line arguments
@@ -76,29 +76,29 @@ def main(exp_group='', exp_id='', nb_epoch=5, nb_filter=1000, filter_lens='1,2,3
     nb_filter /= len(filter_lens) # make it so there are only nb_filter *total* - NOT nb_filter*len(filter_lens)
     callbacks = callbacks.split(',')
     features = features.split(',') if features != '' else []
-    inputs = [input, summary_type]
+    inputs = [input, target]
     labels = None if labels == 'None' else labels
     metric = None if metric == 'None' else metric
     fit_generator = True if fit_generator == 'True' else False
 
     # load data and supervision
-    trainer = eval(trainer)(exp_group, exp_id, hyperparam_dict, summary_type)
+    trainer = eval(trainer)(exp_group, exp_id, hyperparam_dict, target)
     trainer.load_texts(inputs)
     trainer.load_auxiliary(features)
     trainer.load_labels(labels)
 
     # model
     trainer.build_model(nb_filter, filter_lens, nb_hidden, hidden_dim, dropout_prob,
-            dropout_emb, backprop_emb, word2vec_init, reg)
+            dropout_emb, backprop_emb, word2vec_init, reg, loss)
     trainer.compile_model(metric, optimizer, lr, loss)
 
     # load cdnos sorted by the ones with the most studies so we pick those first when undersampling
-    df = pd.read_csv('../data/extra/pico_cdsr.csv', index_col=0)
+    df = pd.read_csv('../data/extra/pico_cdsr.csv')
     cdnos = np.array(df.groupby('cdno').size().sort_values(ascending=False).index)
 
     # split into train and validation at the cdno-level
     from sklearn.cross_validation import train_test_split
-    train_cdno_idxs, val_cdno_idxs = train_test_split(len(cdnos), train_size=train_size, random_state=1337)
+    train_cdno_idxs, val_cdno_idxs = train_test_split(np.arange(len(cdnos)), train_size=train_size, random_state=1337)
     first_train = np.floor(len(train_cdno_idxs)*nb_train)
     train_cdno_idxs = np.sort(train_cdno_idxs)[:first_train.astype('int')] # take a subset (or all!) of the training cdnos
     val_cdno_idxs =  np.sort(val_cdno_idxs)

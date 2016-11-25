@@ -73,7 +73,8 @@ def corrupt_pairs_generator(cdnos, nb_sample, seed, full):
 
         yield study_idxs, corrupt_idxs
 
-def study_target_generator(X_study, X_target, cdnos, exp_group, exp_id, nb_sample=128, seed=None, full=False):
+def study_target_generator(X_study, X_target, cdnos, exp_group, exp_id, nb_sample=128,
+        seed=None, full=False, neg_nb=-1):
     """Wrapper generator around valid_pairs_generator() and
     corrupt_pairs_generator() for yielding batches of ([study, target], y)
     pairs.
@@ -85,16 +86,17 @@ def study_target_generator(X_study, X_target, cdnos, exp_group, exp_id, nb_sampl
     cdnos : corresponding cdno list
     seed : the random seed to use
     nb_sample : number of samples to return
+    neg_nb : number to use for negative examples (use 0 for binary CE and -1 for hinge loss)
 
     The first half of pairs are of the form ([study, corresponding-summary],  1)
-    and second half are of the form ([study, summary-from-different-review], -1).
+    and second half are of the form ([study, summary-from-different-review], neg_nb).
 
     """
     cdno_matching = not np.all(X_study == X_target) # if target is also studies then we don't want exact matching
     nb_sample = nb_sample*2 if full else nb_sample
 
     # construct y
-    y = np.full(shape=[nb_sample, 1], fill_value=-1, dtype=np.int)
+    y = np.full(shape=[nb_sample, 1], fill_value=neg_nb, dtype=np.int)
     y[:nb_sample/2, 0] = 1 # first half of samples are good always
 
     # generators

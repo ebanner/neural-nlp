@@ -33,7 +33,7 @@ class Trainer:
     3. Calls fit() to train
 
     """
-    def __init__(self, exp_group, exp_id, hyperparam_dict, summary_type):
+    def __init__(self, exp_group, exp_id, hyperparam_dict, target):
         """Set attributes
 
         Attributes
@@ -45,7 +45,7 @@ class Trainer:
         self.exp_group = exp_group
         self.exp_id = exp_id
         self.hyperparam_dict = hyperparam_dict
-        self.summary_type = summary_type
+        self.target = target
 
     def load_texts(self, inputs):
         """Load inputs
@@ -57,7 +57,7 @@ class Trainer:
         """
         self.vecs, self.nb_train = OrderedDict(), None
         for input in inputs:
-            self.vecs[input] = pickle.load(open('../data/vectorizers/{}.p'.format(input))) 
+            self.vecs[input_type] = pickle.load(open('../data/vectorizers/{}.p'.format(input))) 
             if self.nb_train:
                 assert self.nb_train == len(self.vecs[input])
             self.nb_train = len(self.vecs[input])
@@ -124,6 +124,7 @@ class Trainer:
                            metrics=per_class_accs(self.y_train) if metric == 'acc' else [])
 
         self.model.summary()
+        self.loss = loss
 
     def save_architecture(self):
         """Write architecture of model to disk
@@ -137,21 +138,22 @@ class Trainer:
         open(model_loc, 'w').write(json_string)
 
     def train(self, train_idxs, val_idxs, nb_epoch, batch_size, callback_list,
-            fold, metric, fit_generator, cdnos, nb_sample, log_full):
+            fold, metric, fit_generator, cdnos, nb_sample, log_full, source, target):
         """Set up callbacks and start training"""
 
         # train and validation sets
         nb_train, nb_val = len(train_idxs), len(val_idxs)
-        X_study, X_summary = self.vecs['abstracts'].X, self.vecs[self.summary_type].X
+        X_study, X_target = self.vecs['abstracts'].X, self.vecs[self.target].X
 
         # get a batch of training data as some callbacks require it
         gen_args = {'X_study': X_study[train_idxs],
-                    'X_target': X_summary[train_idxs],
+                    'X_target': X_target[train_idxs],
                     'nb_sample': batch_size,
                     'cdnos': cdnos[train_idxs],
                     'exp_group': self.exp_group,
                     'exp_id': self.exp_id,
                     'seed': 1337, # random seed
+                    'neg_nb': -1 if self.loss == 'hinge' else 0
         }
         [X_source, X_target], y = next(study_target_generator(**gen_args))
         loggers.FULL = log_full # whether to log full tensors
@@ -171,7 +173,7 @@ class Trainer:
         [X_source_val, X_target_val], y = next(study_study_batch)
         ss = StudySimilarityLogger(X_source_val, X_target_val, study_dim=self.model.get_layer('study').output_shape[-1])
 
-        es = EarlyStopping(monitor='loss', patience=10, verbose=2, mode='min')
+        es = EarlyStopping(monitor='study_similarity', patience=10, verbose=2, mode='max')
         fl = Flusher()
         cv = CSVLogger(self.exp_group, self.exp_id, self.hyperparam_dict, fold)
         tl = TensorLogger([X_source, X_target], y, self.exp_group, self.exp_id,

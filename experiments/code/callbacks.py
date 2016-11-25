@@ -93,12 +93,19 @@ class StudySimilarityLogger(Callback):
             target_vecs[i*bs:(i+1)*bs] = self.embed_studies([self.X_target[i*bs:(i+1)*bs], self.phase])[0]
             i += 1
 
-        score = np.sum(source_vecs*target_vecs, axis=1) # dot corresponding entries
+        # Get rid of NaNs, and normalize source and target vectors
+        source_vecs[np.isnan(source_vecs)] = 0
+        target_vecs[np.isnan(target_vecs)] = 0
+        source_norms = np.apply_along_axis(np.linalg.norm, axis=1, arr=source_vecs)
+        target_norms = np.apply_along_axis(np.linalg.norm, axis=1, arr=target_vecs)
+        source_vecs = source_vecs / source_norms[:, np.newaxis]
+        target_vecs = target_vecs / target_norms[:, np.newaxis]
+
+        # Compute similarity score
+        score = np.sum(source_vecs*target_vecs, axis=1)
         same_study_mean = score[:self.nb_sample/2].mean()
         different_study_mean = score[self.nb_sample/2:].mean()
-
-        # this should be big and positive when we're doing well
-        logs['similarity_score'] = same_study_mean - different_study_mean
+        logs['similarity_score'] = same_study_mean / different_study_mean
 
 class TensorLogger(Callback):
     """Callback for monitoring value of tensors during training"""
