@@ -62,6 +62,7 @@ def make_exp(exp_group, args):
 
     get_ipython().system(u'mkdir -p exps/$exp_group')
     get_ipython().system(u"sed 's/ARGUMENTS/$arg_str/g' job_template | sed 's/EXP_GROUP/$exp_group/g' | sed 's/EXPERIMENT/$exp_name/g' > exps/$exp_group/$exp_name")
+    get_ipython().system(u"chmod a+x exps/$exp_group/$exp_name")
     
 def make_exps(exp_group, args, num_exps=32, grid_search=False, baseline_exp_groups=[]):
     """Wrapper around make_exp()
