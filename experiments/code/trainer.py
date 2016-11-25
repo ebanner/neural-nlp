@@ -62,6 +62,8 @@ class Trainer:
                 assert self.nb_train == len(self.vecs[input])
             self.nb_train = len(self.vecs[input])
 
+        self.source, self.target = inputs
+
     def load_auxiliary(self, feature_names):
         """Load auxillary features
         
@@ -138,25 +140,15 @@ class Trainer:
         open(model_loc, 'w').write(json_string)
 
     def train(self, train_idxs, val_idxs, nb_epoch, batch_size, callback_list,
-            fold, metric, fit_generator, cdnos, nb_sample, log_full, source, target):
+            fold, metric, fit_generator, cdnos, nb_sample, log_full):
         """Set up callbacks and start training"""
 
         # train and validation sets
         nb_train, nb_val = len(train_idxs), len(val_idxs)
         X_study, X_target = self.vecs['abstracts'].X, self.vecs[self.target].X
 
-        # get a batch of training data as some callbacks require it
-        gen_args = {'X_study': X_study[train_idxs],
-                    'X_target': X_target[train_idxs],
-                    'nb_sample': batch_size,
-                    'cdnos': cdnos[train_idxs],
-                    'exp_group': self.exp_group,
-                    'exp_id': self.exp_id,
-                    'seed': 1337, # random seed
-                    'neg_nb': -1 if self.loss == 'hinge' else 0
-        }
-        [X_source, X_target], y = next(study_target_generator(**gen_args))
-        loggers.FULL = log_full # whether to log full tensors
+        # [X_source, X_target], y = next(study_target_generator(**gen_args))
+        # loggers.FULL = log_full # whether to log full tensors
         weight_str = '../store/weights/{}/{}/{}-{}.h5' # where to save model weights
 
         # define callbacks
@@ -169,21 +161,21 @@ class Trainer:
                              mode='min')
 
         study_study_batch = study_target_generator(X_study[val_idxs], X_study[val_idxs],
-                cdnos[val_idxs], self.exp_group, self.exp_id, nb_sample=nb_val, seed=1337, full=True)
+                cdnos[val_idxs], self.exp_group, self.exp_id, nb_sample=nb_val, seed=1337, full=True, cdno_matching=False)
         [X_source_val, X_target_val], y = next(study_study_batch)
         ss = StudySimilarityLogger(X_source_val, X_target_val, study_dim=self.model.get_layer('study').output_shape[-1])
 
         es = EarlyStopping(monitor='study_similarity', patience=10, verbose=2, mode='max')
         fl = Flusher()
         cv = CSVLogger(self.exp_group, self.exp_id, self.hyperparam_dict, fold)
-        tl = TensorLogger([X_source, X_target], y, self.exp_group, self.exp_id,
-                          tensor_funcs=[activations, weights, updates, update_ratios, gradients])
+        # tl = TensorLogger([X_source, X_target], y, self.exp_group, self.exp_id,
+        #                   tensor_funcs=[activations, weights, updates, update_ratios, gradients])
         sl = StudyLogger(X_study[val_idxs], self.exp_group, self.exp_id)
 
         # filter down callbacks
         callback_dict = {'cb': cb, # checkpoint best
                          'ce': ce, # checkpoint every
-                         'tl': tl, # tensor logger
+                         # 'tl': tl, # tensor logger
                          'fl': fl, # flusher
                          'es': es, # early stopping
                          'sl': sl, # study logger
@@ -192,10 +184,20 @@ class Trainer:
         }
         self.callbacks = [callback_dict[cb_name] for cb_name in callback_list]
 
-        # start training
-        gen_study_summary_batches = study_target_generator(**gen_args) # training
+        # train
+        gen_source_target_batches = \
+                study_target_generator(X_study[train_idxs],
+                                       X_target[train_idxs],
+                                       nb_sample=batch_size,
+                                       cdnos=cdnos[train_idxs],
+                                       exp_group=self.exp_group,
+                                       exp_id=self.exp_id,
+                                       seed=1337, # for repeatability
+                                       neg_nb=-1 if self.loss == 'hinge' else 0,
+                                       cdno_matching=self.source!=self.target,
+                                       full=False) # training
 
-        self.model.fit_generator(gen_study_summary_batches,
+        self.model.fit_generator(gen_source_target_batches,
                                  samples_per_epoch=(nb_train/batch_size)*batch_size,
                                  nb_epoch=nb_epoch,
                                  verbose=2,

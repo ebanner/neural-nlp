@@ -74,7 +74,7 @@ def corrupt_pairs_generator(cdnos, nb_sample, seed, full):
         yield study_idxs, corrupt_idxs
 
 def study_target_generator(X_study, X_target, cdnos, exp_group, exp_id, nb_sample=128,
-        seed=None, full=False, neg_nb=-1):
+        seed=None, full=False, neg_nb=-1, cdno_matching=True):
     """Wrapper generator around valid_pairs_generator() and
     corrupt_pairs_generator() for yielding batches of ([study, target], y)
     pairs.
@@ -87,12 +87,13 @@ def study_target_generator(X_study, X_target, cdnos, exp_group, exp_id, nb_sampl
     seed : the random seed to use
     nb_sample : number of samples to return
     neg_nb : number to use for negative examples (use 0 for binary CE and -1 for hinge loss)
+    cdno_matching : yield same indexes for positive examples if `True` else yield
+    indexes just in the same study if `False`
 
     The first half of pairs are of the form ([study, corresponding-summary],  1)
     and second half are of the form ([study, summary-from-different-review], neg_nb).
 
     """
-    cdno_matching = not np.all(X_study == X_target) # if target is also studies then we don't want exact matching
     nb_sample = nb_sample*2 if full else nb_sample
 
     # construct y
@@ -111,11 +112,11 @@ def study_target_generator(X_study, X_target, cdnos, exp_group, exp_id, nb_sampl
         study_idxs = np.concatenate([study_idxs, more_study_idxs])
         summary_idxs = np.concatenate([valid_summary_idxs, corrupt_summary_idxs])
 
-        df = pd.DataFrame({'epoch': [epoch]*nb_sample, 'study_idx': study_idxs, 'summary_idxs': summary_idxs})
-        df.to_csv('../store/batch_idxs/{}/{}.csv'.format(exp_group, exp_id), 
-                  index=False,
-                  mode='a' if epoch > 0 else 'w',
-                  header=epoch==0)
+        # df = pd.DataFrame({'epoch': [epoch]*nb_sample, 'study_idx': study_idxs, 'summary_idxs': summary_idxs})
+        # df.to_csv('../store/batch_idxs/{}/{}.csv'.format(exp_group, exp_id), 
+        #           index=False,
+        #           mode='a' if epoch > 0 else 'w',
+        #           header=epoch==0)
 
         yield [X_study[study_idxs], X_target[summary_idxs]], y
         epoch += 1
