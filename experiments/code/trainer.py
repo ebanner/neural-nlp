@@ -33,7 +33,7 @@ class Trainer:
     3. Calls fit() to train
 
     """
-    def __init__(self, exp_group, exp_id, hyperparam_dict, target):
+    def __init__(self, exp_group, exp_id, hyperparam_dict):
         """Set attributes
 
         Attributes
@@ -45,68 +45,26 @@ class Trainer:
         self.exp_group = exp_group
         self.exp_id = exp_id
         self.hyperparam_dict = hyperparam_dict
-        self.target = target
 
-    def load_texts(self, inputs):
-        """Load inputs
-        
-        Parameters
-        ----------
-        inputs : list of vectorizer names (expected to be in ../data/vectorizers)
-        
-        """
+    def load_texts(self):
+        """Load all PICO inputs"""
+
         self.vecs, self.nb_train = OrderedDict(), None
-        for input in inputs:
+        for input in ['abstract', 'p_summary', 'i_summary', 'o_summary']:
             self.vecs[input] = pickle.load(open('../data/vectorizers/{}.p'.format(input))) 
             if self.nb_train:
                 assert self.nb_train == len(self.vecs[input])
             self.nb_train = len(self.vecs[input])
 
-        self.source, self.target = inputs
-
-    def load_auxiliary(self, feature_names):
-        """Load auxillary features
-        
-        Parameters
-        ----------
-        features : list of additional features to load
-        
-        """
-        self.features = feature_names
-        self.aux_len = 0
-        if not feature_names:
-            return
-
-        nb_train = len(pd.read_csv('../DATA/features/{}.csv'.format(feature_names[0])))
-        features = np.empty(shape=[nb_train, 0]) # to be concatenated
-        for feature_name in feature_names:
-            feature = pd.read_csv('../DATA/features/{}.csv'.format(feature_name))
-            features = np.hstack([features, np.array(feature)])
-            self.aux_len += feature.shape[1]
-
-        self.X_train['features'] = features
-        self.inputs += ['features']
-
-    def load_labels(self, labels):
+    def load_labels(self):
         """Load labels for dataset
 
         Mainly configure class names and validation data
 
         """
-        if not labels:
-            return
-
-        self.y_vectorizer = pickle.load(open('../data/labels/{}.p'.format(labels)))
-        self.y_train = self.y_vectorizer.X
-
-        if type(self.y_train) == scipy.sparse.csr.csr_matrix:
-            self.y_train = self.y_train.todense()
-            sums = self.y_train.sum(axis=0)
-            self.nb_class = np.count_nonzero(sums)
-        else:
-            uniques = np.unique(self.y_train)
-            self.nb_class = len(uniques)
-            self.y_train = to_categorical(self.y_train)
+        self.y = OrderedDict()
+        for s1, s2 in zip(['ap', 'ai', 'ao'], ['pi', 'po', 'io']):
+            self.y[s1], self.y[s2] = np.ones(self.nb_train), np.full(self.nb_train, -1)
 
     def compile_model(self, metric, optimizer, lr, loss):
         """Compile keras model
@@ -122,11 +80,9 @@ class Trainer:
         self.optimizer = optimizers[optimizer](**{'lr': lr, 'clipvalue': 0.5}) # try and clip gradient norm
 
         # define metrics
-        self.model.compile(self.optimizer,
-                           loss=loss,
-                           metrics=per_class_accs(self.y_train) if metric == 'acc' else [])
-
+        self.model.compile(self.optimizer, loss=loss)
         self.model.summary()
+
         self.loss = loss
 
     def save_architecture(self):
@@ -141,18 +97,13 @@ class Trainer:
         open(model_loc, 'w').write(json_string)
 
     def train(self, train_idxs, val_idxs, nb_epoch, batch_size, callback_list,
-            fold, metric, fit_generator, cdnos, nb_sample, log_full, mb_ratio):
+            fold, metric, fit_generator, cdnos, nb_sample, log_full):
         """Set up callbacks and start training"""
 
         # train and validation sets
         nb_train, nb_val = len(train_idxs), len(val_idxs)
-        X_study, X_target = self.vecs['abstracts'].X, self.vecs[self.target].X
 
-        # [X_source, X_target], y = next(study_target_generator(**gen_args))
-        # loggers.FULL = log_full # whether to log full tensors
         weight_str = '../store/weights/{}/{}/{}-{}.h5' # where to save model weights
-
-        # define callbacks
         cb = ModelCheckpoint(weight_str.format(self.exp_group, self.exp_id, fold, metric),
                              monitor='loss',
                              save_best_only=True,
@@ -161,19 +112,19 @@ class Trainer:
                              monitor='loss', # every time training loss goes down
                              mode='min')
 
-        study_study_batch = study_target_generator(X_study[val_idxs], X_study[val_idxs],
-                cdnos[val_idxs], self.exp_group, self.exp_id, nb_sample=nb_val, seed=1337,
-                full=True, cdno_matching=False, pos_ratio=0.5)
+        study_study_batch = study_target_generator(self.vecs['abstract'].X[val_idxs],
+                self.vecs['abstract'].X[val_idxs], cdnos[val_idxs], self.exp_group,
+                self.exp_id, nb_sample=nb_val, seed=1337, full=True, cdno_matching=False, pos_ratio=0.5)
         [X_source_val, X_target_val], y = next(study_study_batch)
-        ss = StudySimilarityLogger(X_source_val, X_target_val, study_dim=self.model.get_layer('study').output_shape[-1])
-        pl = PrecisionLogger(X_source_val, X_target_val, study_dim=self.model.get_layer('study').output_shape[-1])
+        ss = StudySimilarityLogger(X_source_val, X_target_val, study_dim=self.model.get_layer('a_embedding').output_shape[-1])
+        pl = PrecisionLogger(X_source_val, X_target_val, study_dim=self.model.get_layer('a_embedding').output_shape[-1])
 
         es = EarlyStopping(monitor='val_precision', patience=10, verbose=2, mode='max')
         fl = Flusher()
         cv = CSVLogger(self.exp_group, self.exp_id, self.hyperparam_dict, fold)
         # tl = TensorLogger([X_source, X_target], y, self.exp_group, self.exp_id,
         #                   tensor_funcs=[activations, weights, updates, update_ratios, gradients])
-        sl = StudyLogger(X_study[val_idxs], self.exp_group, self.exp_id)
+        # sl = StudyLogger(X_study[val_idxs], self.exp_group, self.exp_id)
 
         # filter down callbacks
         callback_dict = {'cb': cb, # checkpoint best
@@ -181,27 +132,17 @@ class Trainer:
                          # 'tl': tl, # tensor logger
                          'fl': fl, # flusher
                          'es': es, # early stopping
-                         'sl': sl, # study logger
+                         # 'sl': sl, # study logger
                          'pl': pl, # precision logger
                          'ss': ss, # study similarity logger
                          'cv': cv, # should go *last* as other callbacks populate `logs` dict
         }
         self.callbacks = [callback_dict[cb_name] for cb_name in callback_list]
 
-        # train
-        gen_source_target_batches = \
-                study_target_generator(X_study[train_idxs], X_target[train_idxs],
-                                       nb_sample=batch_size,
-                                       cdnos=cdnos[train_idxs],
-                                       exp_group=self.exp_group, exp_id=self.exp_id,
-                                       seed=1337, # for repeatability
-                                       neg_nb=-1 if self.loss == 'hinge' else 0,
-                                       cdno_matching=self.source!=self.target,
-                                       full=False,
-                                       pos_ratio=mb_ratio) # training
-
-        self.model.fit_generator(gen_source_target_batches,
-                                 samples_per_epoch=(nb_train/batch_size)*batch_size,
+        X_train = {input: vec[train_idxs] for input, vec in self.vecs.items()}
+        y_train = {score: y[train_idxs] for score, y in self.y.items()}
+        history = self.model.fit(X_train, y_train,
+                                 batch_size=batch_size,
                                  nb_epoch=nb_epoch,
                                  verbose=2,
                                  callbacks=self.callbacks)

@@ -73,7 +73,7 @@ class PrecisionLogger(Callback):
         """
         # build keras function to get study embeddings
         inputs = [self.model.inputs[0], K.learning_phase()]
-        outputs = self.model.get_layer('study').output
+        outputs = self.model.get_layer('a_embedding').output
         self.embed_studies = K.function(inputs, [outputs])
 
     def on_epoch_end(self, epoch, logs={}):
