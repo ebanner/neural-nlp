@@ -40,6 +40,61 @@ class ValidationLogger(Callback):
         print 'scikit f1s:', f1s
         print 'scikit f1:', np.mean(f1s)
 
+class PrecisionLogger(Callback):
+    """Callback for computing precision during training"""
+
+    def __init__(self, X_source, X_target, study_dim, batch_size=128, phase=0):
+        """Save variables and sample study indices
+
+        Parameters
+        ----------
+        X_source : vectorized studies
+        X_target : vectorized studies where X_target[i] has the same cdno as X_source[i]
+        cdnos : mapping from study indexes to their cdno
+        nb_sample : number of studies to evaluate
+        phase : 1 for train and 0 for test
+
+        """
+        super(Callback, self).__init__()
+
+        self.X_source, self.X_target = X_source, X_target
+        self.phase = phase
+        self.nb_sample = len(self.X_source)
+        self.study_dim = study_dim
+        self.batch_size = batch_size
+        assert len(self.X_target) == self.nb_sample
+
+    def on_train_begin(self, logs={}):
+        """Build keras function to produce vectorized studies
+        
+        Even though some tensors may not need all of these inputs, it doesn't
+        hurt to include them for those that do.
+        
+        """
+        # build keras function to get study embeddings
+        inputs = [self.model.inputs[0], K.learning_phase()]
+        outputs = self.model.get_layer('study').output
+        self.embed_studies = K.function(inputs, [outputs])
+
+    def on_epoch_end(self, epoch, logs={}):
+        """Compute precision between studies in same and different reviews"""
+
+        source_vecs, target_vecs = np.zeros([len(self.X_source), self.study_dim]), np.zeros([len(self.X_target), self.study_dim])
+        i, bs = 0, self.batch_size
+        while i*bs < self.nb_sample:
+            result = self.embed_studies([self.X_source[i*bs:(i+1)*bs], self.phase])[0]
+            source_vecs[i*bs:(i+1)*bs] = result
+            target_vecs[i*bs:(i+1)*bs] = self.embed_studies([self.X_target[i*bs:(i+1)*bs], self.phase])[0]
+            i += 1
+
+        # Get rid of any NaNs
+        source_vecs[np.isnan(source_vecs)] = 0
+        target_vecs[np.isnan(target_vecs)] = 0
+
+        # Compute similarity score
+        score = np.sum(source_vecs*target_vecs, axis=1)
+        logs['val_precision'] = np.mean(score[:self.nb_sample/2] > score[self.nb_sample/2:])
+
 class StudySimilarityLogger(Callback):
     """Callback for computing and inserting the study similarity during training
     

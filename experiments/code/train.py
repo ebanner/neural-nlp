@@ -44,6 +44,10 @@ from trainers import CNNSiameseTrainer, SharedCNNSiameseTrainer
         log_full=('log full tensors with TensorLogger if True and magnitudes otherwise', 'option', None, str),
         train_size=('number between 0 and 1 for train/test split', 'option', None, float),
         target=('type of document to predict', 'option', None, str),
+        mb_ratio=('ratio of positive examples to total examples in a minibatch', 'option', None, float),
+        use_pretrained=('whether to initialize word vectors', 'option', None, str),
+        update_embeddings=('whether to update word vectors during training', 'option', None, str),
+        project_summary=('whether to make an affine projection of the summary embedding before merging', 'option', None, str),
 )
 def main(exp_group='', exp_id='', nb_epoch=5, nb_filter=1000, filter_lens='1,2,3', 
         nb_hidden=1, hidden_dim=1024, dropout_prob=.5, dropout_emb='True', reg=0,
@@ -52,7 +56,8 @@ def main(exp_group='', exp_id='', nb_epoch=5, nb_filter=1000, filter_lens='1,2,3
         callbacks='cb,ce,fl,cv,es', trainer='CNNSiameseTrainer', features='',
         input='abstracts', labels='None', fit_generator='True',
         loss='hinge', nb_train=1., nb_sample=1000, log_full='False', train_size=.97,
-        target='outcomes'):
+        target='outcomes', mb_ratio=0.5, use_pretrained='False',
+        update_embeddings='True', project_summary='False'):
     """Training process
 
     1. Parse command line arguments
@@ -80,6 +85,9 @@ def main(exp_group='', exp_id='', nb_epoch=5, nb_filter=1000, filter_lens='1,2,3
     labels = None if labels == 'None' else labels
     metric = None if metric == 'None' else metric
     fit_generator = True if fit_generator == 'True' else False
+    use_pretrained = True if use_pretrained == 'True' else False
+    update_embeddings = True if update_embeddings == 'True' else False
+    project_summary = True if project_summary == 'True' else False
 
     # load data and supervision
     trainer = eval(trainer)(exp_group, exp_id, hyperparam_dict, target)
@@ -89,7 +97,8 @@ def main(exp_group='', exp_id='', nb_epoch=5, nb_filter=1000, filter_lens='1,2,3
 
     # model
     trainer.build_model(nb_filter, filter_lens, nb_hidden, hidden_dim, dropout_prob,
-            dropout_emb, backprop_emb, word2vec_init, reg, loss)
+            dropout_emb, backprop_emb, word2vec_init, reg, loss, use_pretrained, update_embeddings, 
+            project_summary)
     trainer.compile_model(metric, optimizer, lr, loss)
 
     # load cdnos sorted by the ones with the most studies so we pick those first when undersampling
@@ -109,7 +118,7 @@ def main(exp_group='', exp_id='', nb_epoch=5, nb_filter=1000, filter_lens='1,2,3
     # train
     fold_idx, cdnos = 0, np.array(df.cdno) # fold is legacy
     history = trainer.train(train_study_idxs, val_study_idxs, nb_epoch, batch_size,
-            callbacks, fold_idx, metric, fit_generator, cdnos, nb_sample, log_full)
+            callbacks, fold_idx, metric, fit_generator, cdnos, nb_sample, log_full, mb_ratio)
 
 
 if __name__ == '__main__':
