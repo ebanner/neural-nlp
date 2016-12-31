@@ -34,18 +34,20 @@ class Vectorizer:
         return self.X[given]
 
 
-    def fit(self, texts, maxlen=None, maxlen_ratio=.95):
+    def fit(self, texts, word_list=None):
         """Fit the texts with a keras tokenizer
         
         Parameters
         ----------
         texts : list of strings to fit and vectorize
-        maxlen : maximum length for texts
-        maxlen_ratio : compute maxlen M dynamically as follows: M is the minimum
-        number such that `maxlen_ratio` percent of texts have length greater
-        than or equal to M.
+        word_list : list of words to include in the text
         
         """
+        if word_list:
+            def unkify(word):
+                return word if word in word_list else 'unk'
+            texts = [' '.join(unkify(word) for word in text.split()) for text in texts]
+
         # fit vocabulary
         self.tok = Tokenizer(filters='')
         self.tok.fit_on_texts(texts)
@@ -54,32 +56,37 @@ class Vectorizer:
         self.word2idx = self.tok.word_index
         self.idx2word = {idx: word for word, idx in self.word2idx.items()}
 
-        if not maxlen:
-            # compute `maxlen` dynamically
-            lengths = pd.Series(len(text.split()) for text in texts)
-            for length in range(min(lengths), max(lengths)):
-                nb_lengths = len(lengths[lengths <= length])
-                if nb_lengths / float(len(texts)) >= maxlen_ratio:
-                    self.maxlen = length
-                    break
-        else:
-            self.maxlen = maxlen
-
-        self.texts = texts
         self.vocab_size = len(self.word2idx)
+        self.fit_texts = texts
 
-    def texts_to_sequences(self, texts, do_pad=True):
+    def texts_to_sequences(self, texts, do_pad=True, maxlen=None, maxlen_ratio=0.95):
         """Vectorize texts as sequences of indices
         
         Parameters
         ----------
-        texts : list of strings to vectorize into sequences of indices
+        texts : pd.Series of strings to vectorize into sequences of indices
         do_pad : pad the sequences to `self.maxlen` if true
+        maxlen : maximum length for texts
+        maxlen_ratio : compute maxlen M dynamically as follows: M is the minimum
+        number such that `maxlen_ratio` percent of texts have length greater
+        than or equal to M.
+
+        First replace OOV words with unk token.
 
         """
         self.X = self.tok.texts_to_sequences(texts)
 
         if do_pad:
+            if not maxlen:
+                lengths = pd.Series(len(text.split()) for text in texts)
+                for length in range(min(lengths), max(lengths)):
+                    nb_lengths = np.sum(lengths <= length)
+                    if nb_lengths / float(len(texts)) >= maxlen_ratio:
+                        self.maxlen = length
+                        break
+            else:
+                self.maxlen = maxlen
+
             self.X = sequence.pad_sequences(self.X, maxlen=self.maxlen)
             self.word2idx['[0]'], self.idx2word[0] = 0, '[0]' # add padding token
             self.vocab_size += 1
