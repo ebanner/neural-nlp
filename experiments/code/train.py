@@ -40,14 +40,15 @@ from trainers import SharedTrainer
         nb_sample=('number of reviews sample for computing study similarity', 'option', None, int),
         log_full=('log full tensors with TensorLogger if True and magnitudes otherwise', 'option', None, str),
         train_size=('number between 0 and 1 for train/test split', 'option', None, float),
+        loss_weights=('six weights to use for all the losses', 'option', None, str),
 )
 def main(exp_group='', exp_id='', nb_epoch=5, nb_filter=1000, filter_lens='1,2,3', 
         nb_hidden=1, hidden_dim=1024, dropout_prob=.5, dropout_emb='True', reg=0,
         backprop_emb='False', batch_size=128, word2vec_init='False',
         n_folds=5, optimizer='adam', lr=.001, do_cv='False', metric='loss',
         callbacks='cb,ce,pl,fl,cv,es', trainer='SharedTrainer',
-        fit_generator='True',
-        loss='hinge', nb_train=1., nb_sample=1000, log_full='False', train_size=.97):
+        fit_generator='True', loss='hinge', nb_train=1., nb_sample=1000, log_full='False',
+        train_size=.97, loss_weights='1,1,1,1,1,1'):
     """Training process
 
     1. Parse command line arguments
@@ -72,6 +73,7 @@ def main(exp_group='', exp_id='', nb_epoch=5, nb_filter=1000, filter_lens='1,2,3
     callbacks = callbacks.split(',')
     metric = None if metric == 'None' else metric
     fit_generator = True if fit_generator == 'True' else False
+    loss_weights = [float(loss_weight) for loss_weight in loss_weights.split(',')]
 
     # load data and supervision
     trainer = eval(trainer)(exp_group, exp_id, hyperparam_dict)
@@ -80,7 +82,7 @@ def main(exp_group='', exp_id='', nb_epoch=5, nb_filter=1000, filter_lens='1,2,3
 
     # model
     trainer.build_model(nb_filter, filter_lens, nb_hidden, hidden_dim, dropout_prob,
-            dropout_emb, backprop_emb, word2vec_init, reg, loss)
+            dropout_emb, backprop_emb, word2vec_init, reg, loss, loss_weights)
     trainer.compile_model(metric, optimizer, lr, loss)
 
     # load cdnos sorted by the ones with the most studies so we pick those first when undersampling

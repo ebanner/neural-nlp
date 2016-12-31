@@ -20,7 +20,7 @@ class SharedTrainer(Trainer):
 
     """
     def build_model(self, nb_filter, filter_lens, nb_hidden, hidden_dim,
-            dropout_prob, dropout_emb, backprop_emb, word2vec_init, reg, loss):
+            dropout_prob, dropout_emb, backprop_emb, word2vec_init, reg, loss, loss_weights):
 
         # Embed abstract
         info = self.vecs['abstract']
@@ -48,4 +48,4 @@ class SharedTrainer(Trainer):
         self.model = Model(input=[abstract, p_summary, i_summary, o_summary],
                            output=[ap_score, ai_score, ao_score, pi_score, po_score, io_score])
 
-        self.model.compile(optimizer='sgd', loss='hinge', loss_weights=[1., 1., 1., 1., 1., 1.,])
+        self.model.compile(optimizer='sgd', loss='hinge', loss_weights=loss_weights)
