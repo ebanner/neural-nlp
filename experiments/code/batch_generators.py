@@ -32,11 +32,15 @@ def valid_pairs_generator(cdnos, nb_sample, cdno_matching, seed, full):
         if not cdno_matching:
             # find study idxs in the same study
             for i, study_idx in enumerate(study_idxs):
-                cdno = cdnos[study_idx]
-                valid_study_idxs = cdno2valid_study_idxs[cdno]
-                valid_study_idxs = valid_study_idxs - set([study_idx]) # remove study iteself from consideration
-                valid_study_idx = random.choice(list(valid_study_idxs))
-                valid_idxs[i] = valid_study_idx
+                try:
+                    cdno = cdnos[study_idx]
+                    valid_study_idxs = cdno2valid_study_idxs[cdno]
+                    valid_study_idxs = valid_study_idxs - set([study_idx]) # remove study iteself from consideration
+                    valid_study_idx = random.choice(list(valid_study_idxs))
+                    valid_idxs[i] = valid_study_idx
+                except ValueError:
+                    print study_idx
+                    print cdno2valid_study_idxs[cdno]
                 
         yield study_idxs, valid_idxs
 
@@ -74,7 +78,7 @@ def corrupt_pairs_generator(cdnos, nb_sample, seed, full):
         yield study_idxs, corrupt_idxs
 
 def study_target_generator(X_source, X_target, cdnos, exp_group, exp_id, nb_sample=128,
-        seed=None, full=False, neg_nb=-1, cdno_matching=True):
+        seed=None, full=False, neg_nb=-1, cdno_matching=True, pos_ratio=.1):
     """Wrapper generator around valid_pairs_generator() and
     corrupt_pairs_generator() for yielding batches of ([study, target], y)
     pairs.
@@ -89,20 +93,23 @@ def study_target_generator(X_source, X_target, cdnos, exp_group, exp_id, nb_samp
     neg_nb : number to use for negative examples (use 0 for binary CE and -1 for hinge loss)
     cdno_matching : yield same indexes for positive examples if `True` else yield
     indexes just in the same study if `False`
+    pos_ratio : ratio of positive examples to total examples in a batch
 
     The first half of pairs are of the form ([study, corresponding-summary],  1)
     and second half are of the form ([study, summary-from-different-review], neg_nb).
 
     """
     nb_sample = nb_sample*2 if full else nb_sample
+    nb_valid = int(nb_sample * pos_ratio)
+    nb_neg = nb_sample - nb_valid
 
     # construct y
     y = np.full(shape=[nb_sample, 1], fill_value=neg_nb, dtype=np.int)
-    y[:nb_sample/2, 0] = 1 # first half of samples are good always
+    y[:nb_valid, 0] = 1 # first half of samples are good always
 
     # generators
-    valid_source_target_batch = valid_pairs_generator(cdnos, nb_sample/2, cdno_matching, seed, full)
-    corrupt_source_target_batch = corrupt_pairs_generator(cdnos, nb_sample/2, seed, full)
+    valid_source_target_batch = valid_pairs_generator(cdnos, nb_valid, cdno_matching, seed, full)
+    corrupt_source_target_batch = corrupt_pairs_generator(cdnos, nb_neg, seed, full)
 
     while True:
         source_idxs, valid_target_idxs = next(valid_source_target_batch)
