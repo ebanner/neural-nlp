@@ -1,18 +1,27 @@
-universe = vanilla
+#!/bin/bash
+#
+#SBATCH --job-name=EXP_GROUP-EXPERIMENT
+#################
+#SBATCH --output=/home/banner.ed/pico-vectors/experiments/store/output/EXP_GROUP/EXPERIMENT/out
+#################
+#SBATCH --error=/home/banner.ed/pico-vectors/experiments/store/output/EXP_GROUP/EXPERIMENT/err
+#################
+#SBATCH --time=24:00:00
+#################
+#SBATCH --partition=par-gpu
+#################
+#SBATCH --nodes=1
+#################
+#SBATCH --exclusive
+#################
 
-Initialdir = /u/ebanner/scratch/code/ICHI-2016-challenge/cnn
-Executable = /u/ebanner/scratch/code/ICHI-2016-challenge/cnn/train.sh
-Arguments  = ARGUMENTS
+export PATH=/shared/apps/cuda${CUDAVER}/bin:$PATH
+export LD_LIBRARY_PATH=/shared/apps/cuda${CUDAVER}/lib64:$LD_LIBRARY_PATH
+export LD_LIBRARY_PATH=/home/ekstrand-abueg.m/.local/lib/:$LD_LIBRARY_PATH
+export CUDA_HOME=/shared/apps/cuda${CUDAVER}/
 
-+Group   = "GRAD"
-+Project = "INSTRUCTIONAL"
-+ProjectDescription = "Research"
-+GPUJob = true
+# added by Anaconda2 4.2.0 installer
+export PATH="/home/banner.ed/.anaconda/bin:$PATH"
+export PYTHONPATH="/home/banner.ed/pico-vectors/preprocess:$PYTHONPATH"
 
-requirements = TARGET.GPUSlot
-
-Log    = store/output/EXP_GROUP/EXPERIMENT/log.$(Cluster)
-Output = store/output/EXP_GROUP/EXPERIMENT/out.$(Cluster)
-Error  = store/output/EXP_GROUP/EXPERIMENT/err.$(Cluster)
-
-Queue 1
+cd /home/banner.ed/pico-vectors/experiments/code && python train.py ARGUMENTS
