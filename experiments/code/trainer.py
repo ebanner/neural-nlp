@@ -20,7 +20,7 @@ import loggers
 
 from batch_generators import bg1, bg2
 
-from callbacks import Flusher, TensorLogger, CSVLogger, StudyLogger, StudySimilarityLogger, PrecisionLogger
+from callbacks import *
 
 
 class Trainer:
@@ -50,12 +50,11 @@ class Trainer:
         # split into train and validation at the cdno-level
         from sklearn.cross_validation import train_test_split
         nb_reviews = len(cdnos)
-        train_size = self.C['train_size']
+        train_size, nb_train = self.C['train_size'], self.C['nb_train']
         train_cdno_idxs, val_cdno_idxs = train_test_split(np.arange(nb_reviews), train_size=train_size, random_state=1337)
-        nb_train = len(train_cdno_idxs)
         first_train = np.floor(len(train_cdno_idxs)*nb_train)
         train_cdno_idxs = np.sort(train_cdno_idxs)[:first_train.astype('int')] # take a subset of the training cdnos
-        val_cdno_idxs =  np.sort(val_cdno_idxs)
+        val_cdno_idxs = np.sort(val_cdno_idxs)
         train_cdnos, val_cdnos = set(cdnos[train_cdno_idxs]), set(cdnos[val_cdno_idxs])
         train_idxs = np.array(df[df.cdno.isin(train_cdnos)].index)
         val_idxs = np.array(df[df.cdno.isin(val_cdnos)].index)
@@ -145,12 +144,14 @@ class Trainer:
         ss = StudySimilarityLogger(next(batch), study_dim)
         # pl = PrecisionLogger(X_val, study_dim=self.model.get_layer('study').output_shape[-1])
 
-        es = EarlyStopping(monitor='val_loss', patience=10, verbose=2, mode='min')
+        es = EarlyStopping(monitor='val_similarity', patience=10, verbose=2, mode='max')
         fl = Flusher()
         cv = CSVLogger(exp_group, exp_id, fold)
         # tl = TensorLogger([X_source, X_target], y, self.exp_group, self.exp_id,
         #                   tensor_funcs=[activations, weights, updates, update_ratios, gradients])
         # sl = StudyLogger(X_study[val_idxs], self.exp_group, self.exp_id)
+        idx2word = self.C['abstract'].idx2word
+        lw = LargeWordCallback(idx2word)
 
         # filter down callbacks
         callback_dict = {'cb': cb, # checkpoint best
@@ -162,6 +163,7 @@ class Trainer:
                          # 'pl': pl, # precision logger
                          'ss': ss, # study similarity logger
                          'cv': cv, # should go *last* as other callbacks populate `logs` dict
+                         'lw': lw, # large word callback
         }
         callback_list = self.C['callbacks'].split(',')
         self.callbacks = [callback_dict[cb_name] for cb_name in callback_list]
@@ -171,7 +173,7 @@ class Trainer:
         batch_size, nb_epoch = self.C['batch_size'], self.C['nb_epoch']
 
         self.model.fit_generator(gen_source_target_batches,
-                                 samples_per_epoch=(nb_train/batch_size)*batch_size,
-                                 nb_epoch=nb_epoch,
+                                 steps_per_epoch=(nb_train/batch_size),
+                                 epochs=nb_epoch,
                                  verbose=2,
                                  callbacks=self.callbacks)

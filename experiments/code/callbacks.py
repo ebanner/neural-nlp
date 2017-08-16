@@ -24,12 +24,26 @@ class Flusher(Callback):
     def on_epoch_end(self, epoch, logs={}):
         sys.stdout.flush()
 
+class LargeWordCallback(Callback):
+    """Callback that logs the largest words after every epoch"""
+
+    def __init__(self, idx2word, top_n=20):
+        super(Callback, self).__init__()
+        self.top_n = top_n
+        self.idx2word = idx2word
+
+    def on_epoch_end(self, epoch, logs={}):
+        W, = self.model.get_layer('embedding').get_weights()
+        word_norms = np.sum(W**2, axis=1)
+        large_idxs = np.argsort(-word_norms)[:self.top_n]
+        large_words = [self.idx2word[idx] for idx in large_idxs]
+        logs['words'] = ','.join(large_words)
+
 class ValidationLogger(Callback):
     """Use to test that `metrics.compute_f1` is implemented correctly"""
 
     def __init__(self, X_val, y_val):
         super(Callback, self).__init__()
-
         self.X_val, self.y_val = X_val, y_val.argmax(axis=1)
 
     def on_epoch_end(self, epoch, logs={}):
@@ -140,7 +154,7 @@ class StudySimilarityLogger(Callback):
         outputs = self.model.get_layer('pool').get_output_at(0)
         self.embed_studies = K.function(inputs, [outputs])
 
-    def on_epoch_begin(self, epoch, logs={}):
+    def on_epoch_end(self, epoch, logs={}):
         """Compute study similarity from the same review and different reviews"""
 
         source_vecs = np.zeros([len(self.X_source), self.study_dim])
@@ -164,7 +178,7 @@ class StudySimilarityLogger(Callback):
         score = np.sum(source_vecs*target_vecs, axis=1)
         same_study_mean = score[:self.nb_sample/2].mean()
         different_study_mean = score[self.nb_sample/2:].mean()
-        logs['similarity_score'] = same_study_mean / different_study_mean
+        logs['val_similarity'] = same_study_mean / different_study_mean
 
 class TensorLogger(Callback):
     """Callback for monitoring value of tensors during training"""
@@ -261,8 +275,7 @@ class CSVLogger(Callback):
 
     def __init__(self, exp_group, exp_id, fold):
         args = sys.argv[2:]
-        pnames, pvalues = [pname.lstrip('-') for pname in args[::2]], args[1::2]
-        hyperparam_dict = {pname: pvalue for pname, pvalue in zip(pnames, pvalues)}
+        hyperparam_dict  = dict(args.split('=') for args in args)
 
         self.exp_group, self.exp_id = exp_group, exp_id
         self.fold = fold
@@ -284,6 +297,7 @@ class CSVLogger(Callback):
         
         """
         frame = {metric: [val] for metric, val in logs.items()}
+        print(self.train_path)
         pd.DataFrame(frame).to_csv(self.train_path,
                                    index=False,
                                    mode='a' if epoch > 0 else 'w', # overwrite if starting anew if starting anwe

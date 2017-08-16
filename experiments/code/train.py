@@ -11,11 +11,10 @@ def my_config():
     fold = 0
     optimizer = 'adam'
     metric = 'loss'
-    callbacks = 'ss,cb,ce,fl,cv,es'
+    callbacks = 'ss,cb,ce,fl,cv,lw,es'
     trainer = 'AdversarialTrainer'
     loss = 'hinge'
     nb_train = 1.
-    nb_sample = 1000
     log_full = 'False'
     train_size = .97
     inputs = ['abstract', 'population', 'intervention', 'outcome']
@@ -26,6 +25,7 @@ def my_config():
     exp_id = 0
     nb_epoch = 10
     aspect = 'population'
+    nb_train = .001
 
 
 @ex.automain

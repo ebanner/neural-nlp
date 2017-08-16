@@ -132,7 +132,7 @@ class AdversarialTrainer(Trainer):
             I[s] = Input(shape=[maxlen], dtype='int32', name=s)
 
         W = OrderedDict() # words
-        lookup = Embedding(output_dim=self.C['word_dim'], input_dim=self.C['vocab_size'])
+        lookup = Embedding(output_dim=self.C['word_dim'], input_dim=self.C['vocab_size'], name='embedding')
         for s in A+S+O:
             W[s] = lookup(I[s])
 
