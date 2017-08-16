@@ -3,13 +3,14 @@ from collections import OrderedDict
 import pickle
 
 from keras.layers import Input, Embedding, Dropout, Dense, LSTM, merge
-from keras.layers import Convolution1D, MaxPooling1D, Flatten, merge
-from keras.layers import Activation
+from keras.layers import Conv1D, GlobalMaxPooling1D, Flatten, merge
+from keras.layers import Activation, Lambda, ActivityRegularization
+from keras.layers.merge import Dot
 from keras.models import Model
 from keras.regularizers import l2
 
 from trainer import Trainer
-from support import cnn_embed, per_class_f1s, per_class_accs, average
+from support import cnn_embed, per_class_f1s, per_class_accs, average, norm2d
 
 
 class CNNSiameseTrainer(Trainer):
@@ -102,3 +103,54 @@ class SharedCNNSiameseTrainer(Trainer):
             score = Activation('sigmoid')(score)
 
         self.model = Model(input=[source, target], output=score)
+
+class AdversarialTrainer(Trainer):
+    """Six-input model of abstract and aspect summaries
+
+    The model takes in an abstract and an aspect. We are given a "valid" aspect
+    summary (from the same review) and a "corrupt" aspect summary (from a
+    different review). We are also given the a "same" aspect summary (for the
+    given abstract) along with "same" summaries for the other abstracts (for the
+    given abstract).
+
+    We run a conv over the abstract and summaries for the given aspect. We also
+    compute the norm of the embeddings for each summary so we can either enforce
+    them to be big (for the words in the summaries for the aspect) or small (for
+    words in other aspect summaries).
+    
+    """
+    def build_model(self):
+        maxlen = self.C['maxlen']
+        aspect = self.C['aspect']
+
+        A = ['same_abstract']
+        S = ['same_'+aspect, 'corrupt_'+aspect, 'valid_'+aspect]
+        O = ['same_intervention', 'same_outcome']
+
+        I = OrderedDict() # inputs
+        for s in A+S+O:
+            I[s] = Input(shape=[maxlen], dtype='int32', name=s)
+
+        W = OrderedDict() # words
+        lookup = Embedding(output_dim=self.C['word_dim'], input_dim=self.C['vocab_size'])
+        for s in A+S+O:
+            W[s] = lookup(I[s])
+
+        C, P = OrderedDict(), OrderedDict() # conv and pool
+        convolve, pool = Conv1D(filters=100, kernel_size=1), GlobalMaxPooling1D(name='pool')
+        for s in A+S:
+            C[s] = convolve(W[s])
+            P[s] = pool(C[s])
+
+        D = OrderedDict() # dots
+        for s in S:
+            D[s] = Dot(axes=1, name=s+'_score')([P['same_abstract'], P[s]])
+
+        N = OrderedDict() # norms
+        for s in S+O:
+            N[s] = Lambda(norm2d, output_shape=[1], name=s+'_norm')(W[s])
+
+        for s in S:
+            N[s] = Lambda(lambda x: -x, name='neg_'+s+'_norm')(N[s])
+
+        self.model = Model(inputs=I.values(), outputs=D.values()+N.values())

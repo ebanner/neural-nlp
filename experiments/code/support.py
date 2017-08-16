@@ -8,6 +8,7 @@ import pandas as pd
 import keras.backend as K
 from keras.utils.np_utils import to_categorical
 from keras.regularizers import l2
+from keras.layers import Flatten
 
 from metrics import compute_f1, compute_acc
 
@@ -163,3 +164,17 @@ def top_reviews(cdnos, k):
     cdnos = df.reset_index(drop=True).cdno # get cdnos so we can map studies to their cdno
     train_idxs, val_idxs = np.array((df.train == True).index), np.array((df.train == True).index)
 
+def norm2d(x):
+    """Take the norm of a 2D tensor
+
+    Parameters
+    ----------
+    x : a batch of 3D tensors
+
+    To be used in a Lambda layer.
+
+    """
+    flat = Flatten()(x)
+    squared = K.square(flat)
+    summed = K.sum(squared, axis=1, keepdims=True)
+    return summed

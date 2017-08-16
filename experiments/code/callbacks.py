@@ -43,7 +43,7 @@ class ValidationLogger(Callback):
 class PrecisionLogger(Callback):
     """Callback for computing precision during training"""
 
-    def __init__(self, X_source, X_target, study_dim, batch_size=128, phase=0):
+    def __init__(self, X, study_dim, batch_size=128, phase=0):
         """Save variables and sample study indices
 
         Parameters
@@ -57,7 +57,8 @@ class PrecisionLogger(Callback):
         """
         super(Callback, self).__init__()
 
-        self.X_source, self.X_target = X_source, X_target
+        self.X_source = np.concatenate([X['same_abstract'], X['same_abstract']])
+        self.X_target = np.concatenate([X['valid_abstract'], X['corrupt_abstract']])
         self.phase = phase
         self.nb_sample = len(self.X_source)
         self.study_dim = study_dim
@@ -73,13 +74,14 @@ class PrecisionLogger(Callback):
         """
         # build keras function to get study embeddings
         inputs = [self.model.inputs[0], K.learning_phase()]
-        outputs = self.model.get_layer('study').output
+        outputs = self.model.get_layer('pool').output
         self.embed_studies = K.function(inputs, [outputs])
 
-    def on_epoch_end(self, epoch, logs={}):
+    def on_epoch_begin(self, epoch, logs={}):
         """Compute precision between studies in same and different reviews"""
 
-        source_vecs, target_vecs = np.zeros([len(self.X_source), self.study_dim]), np.zeros([len(self.X_target), self.study_dim])
+        source_vecs = np.zeros([len(self.X_source), self.study_dim])
+        target_vecs = np.zeros([len(self.X_target), self.study_dim])
         i, bs = 0, self.batch_size
         while i*bs < self.nb_sample:
             result = self.embed_studies([self.X_source[i*bs:(i+1)*bs], self.phase])[0]
@@ -87,7 +89,7 @@ class PrecisionLogger(Callback):
             target_vecs[i*bs:(i+1)*bs] = self.embed_studies([self.X_target[i*bs:(i+1)*bs], self.phase])[0]
             i += 1
 
-        # Get rid of any NaNs
+        # Get rid of any NaNs (shouldn't have to have this but yolo)
         source_vecs[np.isnan(source_vecs)] = 0
         target_vecs[np.isnan(target_vecs)] = 0
 
@@ -103,7 +105,7 @@ class StudySimilarityLogger(Callback):
     reviews.
     
     """
-    def __init__(self, X_source, X_target, study_dim, batch_size=128, phase=0):
+    def __init__(self, X, study_dim, batch_size=128, phase=0):
         """Save variables and sample study indices
 
         Parameters
@@ -118,7 +120,8 @@ class StudySimilarityLogger(Callback):
         """
         super(Callback, self).__init__()
 
-        self.X_source, self.X_target = X_source, X_target
+        self.X_source = np.concatenate([X['same_abstract'], X['same_abstract']])
+        self.X_target = np.concatenate([X['valid_abstract'], X['corrupt_abstract']])
         self.phase = phase
         self.nb_sample = len(self.X_source)
         self.study_dim = study_dim
@@ -134,13 +137,14 @@ class StudySimilarityLogger(Callback):
         """
         # build keras function to get study embeddings
         inputs = [self.model.inputs[0], K.learning_phase()]
-        outputs = self.model.get_layer('study').output
+        outputs = self.model.get_layer('pool').get_output_at(0)
         self.embed_studies = K.function(inputs, [outputs])
 
-    def on_epoch_end(self, epoch, logs={}):
+    def on_epoch_begin(self, epoch, logs={}):
         """Compute study similarity from the same review and different reviews"""
 
-        source_vecs, target_vecs = np.zeros([len(self.X_source), self.study_dim]), np.zeros([len(self.X_target), self.study_dim])
+        source_vecs = np.zeros([len(self.X_source), self.study_dim])
+        target_vecs = np.zeros([len(self.X_target), self.study_dim])
         i, bs = 0, self.batch_size
         while i*bs < self.nb_sample:
             result = self.embed_studies([self.X_source[i*bs:(i+1)*bs], self.phase])[0]
@@ -255,7 +259,11 @@ class TensorLogger(Callback):
 class CSVLogger(Callback):
     """Callback for dumping csv data during training"""
 
-    def __init__(self, exp_group, exp_id, hyperparam_dict, fold):
+    def __init__(self, exp_group, exp_id, fold):
+        args = sys.argv[2:]
+        pnames, pvalues = [pname.lstrip('-') for pname in args[::2]], args[1::2]
+        hyperparam_dict = {pname: pvalue for pname, pvalue in zip(pnames, pvalues)}
+
         self.exp_group, self.exp_id = exp_group, exp_id
         self.fold = fold
         self.train_path = '../store/train/{}/{}/{}.csv'.format(self.exp_group, self.exp_id, self.fold)
